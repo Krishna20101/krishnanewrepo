@@ -1,0 +1,365 @@
+{
+  "source": "disha_bat_scrape",
+  "id": "65",
+  "name": "Spoken English Batch - 2026",
+  "thumbnail": "https://appx-content-v2.classx.co.in/paid_course3/2026-02-27-0_9007380238062749.png",
+  "price": "-10",
+  "slug": "",
+  "scraped_at": "2026-10-25T14:02:24.750297",
+  "gb_token_used": true,
+  "video_urls_fetched": false,
+  "item_count": 35,
+  "tree": [
+    {
+      "id": "131717",
+      "parent_id": "-1",
+      "title": "Home",
+      "type": "FOLDER",
+      "thumbnail": "",
+      "videos_count": 23,
+      "files_count": 7,
+      "children": [
+        {
+          "id": "131722",
+          "parent_id": "131717",
+          "title": "Spoken English Batch Launching",
+          "type": "VIDEO",
+          "thumbnail": "https://appx-content-v2.classx.co.in/subject/2026-02-27-0_8739802196472146.png",
+          "videos_count": 0,
+          "files_count": 0,
+          "video_id_enc": "OS/DACYebiVsPPwcXl9zRw==:ZmVkY2JhOTg3NjU0MzIxMA==",
+          "pdf_link_enc": "6JaMPbY1Wn6AVb5u6uhyiBiomWEZo4qFvj6t7Um+HV4=:ZmVkY2JhOTg3NjU0MzIxMA=="
+        },
+        {
+          "id": "131719",
+          "parent_id": "131717",
+          "title": "All Live Class - 2026",
+          "type": "FOLDER",
+          "thumbnail": "https://appx-content-v2.classx.co.in/paid_course4/2026-02-27-0_449800277639976.png",
+          "videos_count": 21,
+          "files_count": 0,
+          "children": [
+            {
+              "id": "131790",
+              "parent_id": "131719",
+              "title": "Spoken English Part-1",
+              "type": "VIDEO",
+              "thumbnail": "https://appx-content-v2.classx.co.in/subject/2026-03-02-0_8107146052024184.png",
+              "videos_count": 0,
+              "files_count": 0,
+              "video_id_enc": "xllkUYKmT/3tHw1mOZvNyA==:ZmVkY2JhOTg3NjU0MzIxMA==",
+              "pdf_link_enc": "6JaMPbY1Wn6AVb5u6uhyiBiomWEZo4qFvj6t7Um+HV4=:ZmVkY2JhOTg3NjU0MzIxMA=="
+            },
+            {
+              "id": "131791",
+              "parent_id": "131719",
+              "title": "Spoken English PART -2",
+              "type": "VIDEO",
+              "thumbnail": "https://appx-content-v2.classx.co.in/subject/2026-03-05-0_8846237437827469.png",
+              "videos_count": 0,
+              "files_count": 0
+            },
+            {
+              "id": "131832",
+              "parent_id": "131719",
+              "title": "Spoken English PART -3",
+              "type": "VIDEO",
+              "thumbnail": "https://appx-content-v2.classx.co.in/subject/2026-03-06-0_8472534738187121.png",
+              "videos_count": 0,
+              "files_count": 0,
+              "pdf_link_enc": "6JaMPbY1Wn6AVb5u6uhyiBiomWEZo4qFvj6t7Um+HV4=:ZmVkY2JhOTg3NjU0MzIxMA=="
+            },
+            {
+              "id": "131927",
+              "parent_id": "131719",
+              "title": "Spoken English PART -4",
+              "type": "VIDEO",
+              "thumbnail": "https://appx-content-v2.classx.co.in/subject/2026-03-11-0_17657659780337553.png",
+              "videos_count": 0,
+              "files_count": 0,
+              "pdf_link_enc": "6JaMPbY1Wn6AVb5u6uhyiBiomWEZo4qFvj6t7Um+HV4=:ZmVkY2JhOTg3NjU0MzIxMA=="
+            },
+            {
+              "id": "131978",
+              "parent_id": "131719",
+              "title": "Spoken English PART -5",
+              "type": "VIDEO",
+              "thumbnail": "https://appx-content-v2.classx.co.in/subject/2026-03-12-0_6897316567687647.png",
+              "videos_count": 0,
+              "files_count": 0,
+              "pdf_link_enc": "6JaMPbY1Wn6AVb5u6uhyiBiomWEZo4qFvj6t7Um+HV4=:ZmVkY2JhOTg3NjU0MzIxMA=="
+            },
+            {
+              "id": "132038",
+              "parent_id": "131719",
+              "title": "Spoken English PART -6",
+              "type": "VIDEO",
+              "thumbnail": "https://appx-content-v2.classx.co.in/subject/2026-03-13-0_8346121361550324.png",
+              "videos_count": 0,
+              "files_count": 0,
+              "pdf_link_enc": "6JaMPbY1Wn6AVb5u6uhyiBiomWEZo4qFvj6t7Um+HV4=:ZmVkY2JhOTg3NjU0MzIxMA=="
+            },
+            {
+              "id": "132088",
+              "parent_id": "131719",
+              "title": "Spoken English (TEST) PART -7",
+              "type": "VIDEO",
+              "thumbnail": "https://appx-content-v2.classx.co.in/subject/2026-03-14-0_378130461505075.png",
+              "videos_count": 0,
+              "files_count": 0,
+              "pdf_link_enc": "6JaMPbY1Wn6AVb5u6uhyiBiomWEZo4qFvj6t7Um+HV4=:ZmVkY2JhOTg3NjU0MzIxMA=="
+            },
+            {
+              "id": "132108",
+              "parent_id": "131719",
+              "title": "Spoken English PART -8",
+              "type": "VIDEO",
+              "thumbnail": "https://appx-content-v2.classx.co.in/subject/2026-03-15-0_7655652447704132.png",
+              "videos_count": 0,
+              "files_count": 0,
+              "pdf_link_enc": "6JaMPbY1Wn6AVb5u6uhyiBiomWEZo4qFvj6t7Um+HV4=:ZmVkY2JhOTg3NjU0MzIxMA=="
+            },
+            {
+              "id": "132142",
+              "parent_id": "131719",
+              "title": "Spoken English PART -9",
+              "type": "VIDEO",
+              "thumbnail": "https://appx-content-v2.classx.co.in/subject/2026-03-16-0_5047021205288156.png",
+              "videos_count": 0,
+              "files_count": 0
+            },
+            {
+              "id": "132395",
+              "parent_id": "131719",
+              "title": "Spoken English PART -10",
+              "type": "VIDEO",
+              "thumbnail": "https://appx-content-v2.classx.co.in/subject/2026-03-31-0_6377098566553461.png",
+              "videos_count": 0,
+              "files_count": 0
+            },
+            {
+              "id": "132462",
+              "parent_id": "131719",
+              "title": "Spoken English PART -11",
+              "type": "VIDEO",
+              "thumbnail": "https://appx-content-v2.classx.co.in/subject/2026-04-02-0_2266359978863154.png",
+              "videos_count": 0,
+              "files_count": 0,
+              "pdf_link_enc": "6JaMPbY1Wn6AVb5u6uhyiBiomWEZo4qFvj6t7Um+HV4=:ZmVkY2JhOTg3NjU0MzIxMA=="
+            },
+            {
+              "id": "132492",
+              "parent_id": "131719",
+              "title": "Spoken English PART -12",
+              "type": "VIDEO",
+              "thumbnail": "https://appx-content-v2.classx.co.in/paid_course4/2026-04-03-0_7807320862416711.png",
+              "videos_count": 0,
+              "files_count": 0,
+              "pdf_link_enc": "6JaMPbY1Wn6AVb5u6uhyiBiomWEZo4qFvj6t7Um+HV4=:ZmVkY2JhOTg3NjU0MzIxMA=="
+            },
+            {
+              "id": "139668",
+              "parent_id": "131719",
+              "title": "Spoken English PART -13",
+              "type": "VIDEO",
+              "thumbnail": "https://appx-content-v2.classx.co.in/subject/2026-04-03-0_7938156263732435.png",
+              "videos_count": 0,
+              "files_count": 0
+            },
+            {
+              "id": "139774",
+              "parent_id": "131719",
+              "title": "Spoken English PART -14",
+              "type": "VIDEO",
+              "thumbnail": "https://appx-content-v2.classx.co.in/subject/2026-04-05-0_5972910624983285.png",
+              "videos_count": 0,
+              "files_count": 0,
+              "pdf_link_enc": "6JaMPbY1Wn6AVb5u6uhyiBiomWEZo4qFvj6t7Um+HV4=:ZmVkY2JhOTg3NjU0MzIxMA=="
+            },
+            {
+              "id": "139803",
+              "parent_id": "131719",
+              "title": "Spoken English PART -15",
+              "type": "VIDEO",
+              "thumbnail": "https://appx-content-v2.classx.co.in/subject/2026-04-07-0_6501574192331073.png",
+              "videos_count": 0,
+              "files_count": 0,
+              "pdf_link_enc": "6JaMPbY1Wn6AVb5u6uhyiBiomWEZo4qFvj6t7Um+HV4=:ZmVkY2JhOTg3NjU0MzIxMA=="
+            },
+            {
+              "id": "139859",
+              "parent_id": "131719",
+              "title": "Spoken English PART -16",
+              "type": "VIDEO",
+              "thumbnail": "https://appx-content-v2.classx.co.in/paid_course4/2026-04-10-0_3262997188658917.png",
+              "videos_count": 0,
+              "files_count": 0,
+              "pdf_link_enc": "6JaMPbY1Wn6AVb5u6uhyiBiomWEZo4qFvj6t7Um+HV4=:ZmVkY2JhOTg3NjU0MzIxMA=="
+            },
+            {
+              "id": "139889",
+              "parent_id": "131719",
+              "title": "Spoken English PART -17",
+              "type": "VIDEO",
+              "thumbnail": "https://appx-content-v2.classx.co.in/paid_course4/2026-04-10-0_7346669858213535.png",
+              "videos_count": 0,
+              "files_count": 0,
+              "pdf_link_enc": "6JaMPbY1Wn6AVb5u6uhyiBiomWEZo4qFvj6t7Um+HV4=:ZmVkY2JhOTg3NjU0MzIxMA=="
+            },
+            {
+              "id": "139927",
+              "parent_id": "131719",
+              "title": "Spoken English PART -18",
+              "type": "VIDEO",
+              "thumbnail": "https://appx-content-v2.classx.co.in/subject/2026-04-10-0_6242463613826381.png",
+              "videos_count": 0,
+              "files_count": 0,
+              "pdf_link_enc": "6JaMPbY1Wn6AVb5u6uhyiBiomWEZo4qFvj6t7Um+HV4=:ZmVkY2JhOTg3NjU0MzIxMA=="
+            },
+            {
+              "id": "140009",
+              "parent_id": "131719",
+              "title": "Spoken English PART -19",
+              "type": "VIDEO",
+              "thumbnail": "https://appx-content-v2.classx.co.in/subject/2026-04-12-0_5580379989257229.png",
+              "videos_count": 0,
+              "files_count": 0,
+              "pdf_link_enc": "6JaMPbY1Wn6AVb5u6uhyiBiomWEZo4qFvj6t7Um+HV4=:ZmVkY2JhOTg3NjU0MzIxMA=="
+            },
+            {
+              "id": "140144",
+              "parent_id": "131719",
+              "title": "Spoken English PART -20",
+              "type": "VIDEO",
+              "thumbnail": "https://appx-content-v2.classx.co.in/subject/2026-04-15-0_15071766955202115.png",
+              "videos_count": 0,
+              "files_count": 0,
+              "pdf_link_enc": "6JaMPbY1Wn6AVb5u6uhyiBiomWEZo4qFvj6t7Um+HV4=:ZmVkY2JhOTg3NjU0MzIxMA=="
+            },
+            {
+              "id": "140192",
+              "parent_id": "131719",
+              "title": "Spoken English PART -21",
+              "type": "VIDEO",
+              "thumbnail": "https://appx-content-v2.classx.co.in/subject/2026-04-16-0_053947720032494706.png",
+              "videos_count": 0,
+              "files_count": 0
+            }
+          ]
+        },
+        {
+          "id": "132053",
+          "parent_id": "131717",
+          "title": "Notes",
+          "type": "FOLDER",
+          "thumbnail": "https://appx-content-v2.classx.co.in/paid_course4/2026-03-14-0_12298504049723913.png",
+          "videos_count": 0,
+          "files_count": 7,
+          "children": [
+            {
+              "id": "132054",
+              "parent_id": "132053",
+              "title": "Daily Use Words & Sentences",
+              "type": "PDF",
+              "thumbnail": "https://appx-content-v2.classx.co.in/subject/2026-03-14-0_562293328950887.png",
+              "videos_count": 0,
+              "files_count": 0,
+              "pdf_link_enc": "6JaMPbY1Wn6AVb5u6uhyiBiomWEZo4qFvj6t7Um+HV4=:ZmVkY2JhOTg3NjU0MzIxMA=="
+            },
+            {
+              "id": "132094",
+              "parent_id": "132053",
+              "title": "Daily Use Words & Sentences PART -2",
+              "type": "PDF",
+              "thumbnail": "https://appx-content-v2.classx.co.in/subject/2026-03-15-0_4616516096929698.png",
+              "videos_count": 0,
+              "files_count": 0,
+              "pdf_link_enc": "6JaMPbY1Wn6AVb5u6uhyiBiomWEZo4qFvj6t7Um+HV4=:ZmVkY2JhOTg3NjU0MzIxMA=="
+            },
+            {
+              "id": "132221",
+              "parent_id": "132053",
+              "title": "Daily Use Words & Sentences PART -4",
+              "type": "PDF",
+              "thumbnail": "https://appx-content-v2.classx.co.in/subject/2026-03-18-0_8577025233711144.png",
+              "videos_count": 0,
+              "files_count": 0,
+              "pdf_link_enc": "6JaMPbY1Wn6AVb5u6uhyiBiomWEZo4qFvj6t7Um+HV4=:ZmVkY2JhOTg3NjU0MzIxMA=="
+            },
+            {
+              "id": "132222",
+              "parent_id": "132053",
+              "title": "Daily Use Words & Sentences PART -5",
+              "type": "PDF",
+              "thumbnail": "https://appx-content-v2.classx.co.in/subject/2026-03-18-0_43044364283888725.png",
+              "videos_count": 0,
+              "files_count": 0,
+              "pdf_link_enc": "6JaMPbY1Wn6AVb5u6uhyiBiomWEZo4qFvj6t7Um+HV4=:ZmVkY2JhOTg3NjU0MzIxMA=="
+            },
+            {
+              "id": "132223",
+              "parent_id": "132053",
+              "title": "Daily Use Words & Sentences PART -6",
+              "type": "PDF",
+              "thumbnail": "https://appx-content-v2.classx.co.in/subject/2026-03-18-0_6344244726484551.png",
+              "videos_count": 0,
+              "files_count": 0,
+              "pdf_link_enc": "6JaMPbY1Wn6AVb5u6uhyiBiomWEZo4qFvj6t7Um+HV4=:ZmVkY2JhOTg3NjU0MzIxMA=="
+            },
+            {
+              "id": "132224",
+              "parent_id": "132053",
+              "title": "Daily Use Words & Sentences PART -7",
+              "type": "PDF",
+              "thumbnail": "https://appx-content-v2.classx.co.in/subject/2026-03-18-0_9496338159750893.png",
+              "videos_count": 0,
+              "files_count": 0,
+              "pdf_link_enc": "6JaMPbY1Wn6AVb5u6uhyiBiomWEZo4qFvj6t7Um+HV4=:ZmVkY2JhOTg3NjU0MzIxMA=="
+            },
+            {
+              "id": "132220",
+              "parent_id": "132053",
+              "title": "Daily Use Words & Sentences PART -8",
+              "type": "PDF",
+              "thumbnail": "https://appx-content-v2.classx.co.in/subject/2026-03-18-0_42074477925475373.png",
+              "videos_count": 0,
+              "files_count": 0,
+              "pdf_link_enc": "6JaMPbY1Wn6AVb5u6uhyiBiomWEZo4qFvj6t7Um+HV4=:ZmVkY2JhOTg3NjU0MzIxMA=="
+            }
+          ]
+        },
+        {
+          "id": "131718",
+          "parent_id": "131717",
+          "title": "WhatsApp Group",
+          "type": "LINK",
+          "thumbnail": "https://appx-content-v2.classx.co.in/paid_course4/2026-03-01-0_5148463713857808.png",
+          "videos_count": 0,
+          "files_count": 0,
+          "link": "https://whatsapp.com/channel/0029Vb7ZSyR6LwHlWjBhlv15"
+        },
+        {
+          "id": "158085",
+          "parent_id": "131717",
+          "title": "Info",
+          "type": "FOLDER",
+          "thumbnail": "",
+          "videos_count": 1,
+          "files_count": 0,
+          "children": [
+            {
+              "id": "158091",
+              "parent_id": "158085",
+              "title": "12th HINDI BOOK Full Information",
+              "type": "VIDEO",
+              "thumbnail": "https://appx-content-v2.classx.co.in/subject/2026-10-01-0_21401322356027885.png",
+              "videos_count": 0,
+              "files_count": 0
+            }
+          ]
+        }
+      ]
+    }
+  ],
+  "videos": []
+}
