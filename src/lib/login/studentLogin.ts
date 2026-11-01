@@ -1,10 +1,14 @@
 "use client";
 
-// Student login goes through our server (/api/auth/login), which runs the
-// same 2-step Disha flow as dishaplayer.py. A browser cannot call that API
-// directly: custom Auth-Key headers fail the CORS preflight.
+// Login hits Disha directly from the browser, same request as the working
+// player (batdisha): POST /post/userLogin?extra_details=0
+// Headers: Auth-Key, Client-Service, Source, Accept
+// Body: email + password only. CORS on that API allows these headers.
 
 export const STUDENT_SESSION_KEY = "shd_student_session_v1";
+
+const DISHA_LOGIN =
+  "https://dishaonlineclassesapi.classx.co.in/post/userLogin?extra_details=0";
 
 export interface StudentLoginInput {
   userId: string;
@@ -36,36 +40,79 @@ export function isStudentLoggedIn(): boolean {
   return Boolean(readStudentSession());
 }
 
+async function readJson(res: Response): Promise<Record<string, unknown>> {
+  const text = await res.text();
+  try {
+    const parsed = JSON.parse(text) as unknown;
+    if (parsed && typeof parsed === "object") return parsed as Record<string, unknown>;
+  } catch {
+    const match = text.match(/\{[\s\S]*\}/);
+    if (match) {
+      try {
+        const parsed = JSON.parse(match[0]) as unknown;
+        if (parsed && typeof parsed === "object") return parsed as Record<string, unknown>;
+      } catch { /* ignore */ }
+    }
+  }
+  return {};
+}
+
 export async function loginStudentRequest(
   input: StudentLoginInput,
   apiBase = ""
 ): Promise<StudentLoginResult> {
-  const userId = String(input.userId || "").trim();
+  const email = String(input.userId || "").trim();
   const password = String(input.password || "");
 
-  if (!userId || !password.trim()) {
+  if (!email || !password) {
     return { ok: false, error: "Please enter your Mobile Number / ID and Password." };
   }
 
+  const body = new URLSearchParams();
+  body.append("email", email);
+  body.append("password", password);
+
+  let dishaData: Record<string, unknown>;
   try {
-    const res = await fetch(`${apiBase}/api/auth/login`, {
+    const res = await fetch(DISHA_LOGIN, {
+      method: "POST",
+      headers: {
+        Accept: "*/*",
+        "Auth-Key": "appxapi",
+        "Client-Service": "Appx",
+        Source: "website",
+        "Content-Type": "application/x-www-form-urlencoded",
+      },
+      body: body.toString(),
+    });
+    dishaData = await readJson(res);
+  } catch {
+    return { ok: false, error: "Could not reach Disha servers. Please check your connection." };
+  }
+
+  const status = Number(dishaData?.status);
+  const user =
+    dishaData?.data && typeof dishaData.data === "object"
+      ? (dishaData.data as Record<string, unknown>)
+      : null;
+
+  if (status !== 200 || !user) {
+    const msg = String(dishaData?.message || dishaData?.msg || "").trim();
+    return { ok: false, error: msg || "Invalid User ID / Mobile Number or Password." };
+  }
+
+  try {
+    const saveRes = await fetch(`${apiBase}/api/auth/save-login`, {
       method: "POST",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ userId, password }),
+      body: JSON.stringify({ email, password, dishaResponse: dishaData }),
     });
-    const data = (await res.json().catch(() => ({}))) as {
-      ok?: boolean;
-      sessionToken?: string;
-      error?: string;
-    };
-    if (!res.ok || !data.ok || !data.sessionToken) {
-      return {
-        ok: false,
-        error: data.error || "Invalid User ID / Mobile Number or Password.",
-      };
-    }
-    return { ok: true, sessionToken: data.sessionToken };
+    const saved = (await saveRes.json().catch(() => ({}))) as { sessionToken?: string };
+    if (saved?.sessionToken) return { ok: true, sessionToken: String(saved.sessionToken) };
   } catch {
-    return { ok: false, error: "Network error. Please check your connection." };
+    // Local session still counts as logged in if our log endpoint is down.
   }
+
+  const fallback = `sess_${Date.now()}_${Math.random().toString(36).slice(2, 9)}`;
+  return { ok: true, sessionToken: fallback };
 }
