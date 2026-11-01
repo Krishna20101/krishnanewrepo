@@ -1,0 +1,15 @@
+rules_version = '2';
+service cloud.firestore {
+  match /databases/{database}/documents {
+    // ========================================================================
+    // MAXIMUM SECURITY LOCKDOWN (Jab aap .env me FIREBASE_CLIENT_EMAIL aur
+    // FIREBASE_PRIVATE_KEY Service Account lagate hain):
+    // Firebase Admin SDK in rules ko bypass karta hai (sirf aapke Vercel server se),
+    // aur baaki poori duniya ke liye aapka database 100% LOCK rehta hai!
+    // Koi bhi bahar se aapke database ko bilkul read ya write nahi kar sakta!
+    // ========================================================================
+    match /{document=**} {
+      allow read, write: if false;
+    }
+  }
+}

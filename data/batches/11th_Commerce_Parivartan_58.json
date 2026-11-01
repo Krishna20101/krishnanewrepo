@@ -1,0 +1,81 @@
+{
+  "source": "disha_bat_scrape",
+  "id": "58",
+  "name": "11th Commerce - परिवर्तन बैच (2026-2027)",
+  "thumbnail": "",
+  "price": "999",
+  "slug": "11th-commerce-parivartan-2027",
+  "scraped_at": "2026-10-25T13:52:00.000000",
+  "gb_token_used": true,
+  "video_urls_fetched": false,
+  "item_count": 8,
+  "tree": [
+    {
+      "id": "201001",
+      "parent_id": "-1",
+      "title": "Accountancy - 2027",
+      "type": "FOLDER",
+      "thumbnail": "",
+      "videos_count": 2,
+      "files_count": 2,
+      "children": [
+        {
+          "id": "201002",
+          "parent_id": "201001",
+          "title": "Chapter 1 - Introduction to Accounting",
+          "type": "FOLDER",
+          "thumbnail": "",
+          "videos_count": 2,
+          "files_count": 2,
+          "children": [
+            {
+              "id": "201003",
+              "parent_id": "201002",
+              "title": "Accountancy Complete Syllabus & Basics L-1",
+              "type": "VIDEO",
+              "thumbnail": "",
+              "uploaded_at": "01-03-2026 at 05:00 pm",
+              "videos_count": 0,
+              "files_count": 0,
+              "pdf_link_enc": "acc_pdf_1"
+            },
+            {
+              "id": "201004",
+              "parent_id": "201002",
+              "title": "Accounting Terms & Golden Rules L-2",
+              "type": "VIDEO",
+              "thumbnail": "",
+              "uploaded_at": "03-03-2026 at 05:00 pm",
+              "videos_count": 0,
+              "files_count": 0,
+              "pdf_link_enc": "acc_pdf_2"
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "id": "202001",
+      "parent_id": "-1",
+      "title": "Business Studies - 2027",
+      "type": "FOLDER",
+      "thumbnail": "",
+      "videos_count": 1,
+      "files_count": 1,
+      "children": [
+        {
+          "id": "202002",
+          "parent_id": "202001",
+          "title": "Nature and Purpose of Business L-1",
+          "type": "VIDEO",
+          "thumbnail": "",
+          "uploaded_at": "05-03-2026 at 06:30 pm",
+          "videos_count": 0,
+          "files_count": 0,
+          "pdf_link_enc": "bst_pdf_1"
+        }
+      ]
+    }
+  ],
+  "videos": []
+}

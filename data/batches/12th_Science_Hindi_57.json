@@ -1,0 +1,224 @@
+{
+  "source": "disha_bat_scrape",
+  "id": "57",
+  "name": "12th Science - हिंदी माध्यम (2026-2027)",
+  "thumbnail": "",
+  "price": "999",
+  "slug": "12th-science-hindi-2027",
+  "scraped_at": "2026-10-25T13:57:00.000000",
+  "gb_token_used": true,
+  "video_urls_fetched": false,
+  "item_count": 18,
+  "tree": [
+    {
+      "id": "160508",
+      "parent_id": "-1",
+      "title": "Crash Course - 2027",
+      "type": "FOLDER",
+      "thumbnail": "",
+      "videos_count": 6,
+      "files_count": 4,
+      "children": [
+        {
+          "id": "160509",
+          "parent_id": "160508",
+          "title": "Crash Course - 2027",
+          "type": "FOLDER",
+          "thumbnail": "",
+          "videos_count": 3,
+          "files_count": 2,
+          "children": [
+            {
+              "id": "160510",
+              "parent_id": "160509",
+              "title": "12th मंजिल बैच Crash Course Orientation",
+              "type": "VIDEO",
+              "thumbnail": "",
+              "uploaded_at": "17-02-2026 at 10:10 pm",
+              "videos_count": 0,
+              "files_count": 0,
+              "pdf_link_enc": "demo_pdf_1"
+            },
+            {
+              "id": "160511",
+              "parent_id": "160509",
+              "title": "Complete Board Exam Strategy 450+ Target",
+              "type": "VIDEO",
+              "thumbnail": "",
+              "uploaded_at": "19-02-2026 at 08:00 pm",
+              "videos_count": 0,
+              "files_count": 0,
+              "pdf_link_enc": "demo_pdf_2"
+            },
+            {
+              "id": "160512",
+              "parent_id": "160509",
+              "title": "Crash Course Full Schedule PDF",
+              "type": "PDF",
+              "thumbnail": "",
+              "uploaded_at": "20-02-2026 at 09:00 am",
+              "videos_count": 0,
+              "files_count": 0,
+              "pdf_link_enc": "demo_pdf_3"
+            }
+          ]
+        },
+        {
+          "id": "160520",
+          "parent_id": "160508",
+          "title": "Exam सारथी - 2027",
+          "type": "FOLDER",
+          "thumbnail": "",
+          "videos_count": 2,
+          "files_count": 1,
+          "children": [
+            {
+              "id": "160521",
+              "parent_id": "160520",
+              "title": "Question Bank Maha Marathon - Part 1",
+              "type": "VIDEO",
+              "thumbnail": "",
+              "uploaded_at": "22-02-2026 at 07:30 pm",
+              "videos_count": 0,
+              "files_count": 0,
+              "pdf_link_enc": "demo_pdf_4"
+            }
+          ]
+        },
+        {
+          "id": "160530",
+          "parent_id": "160508",
+          "title": "All Subject Notes - 2027",
+          "type": "FOLDER",
+          "thumbnail": "",
+          "videos_count": 0,
+          "files_count": 2,
+          "children": [
+            {
+              "id": "160531",
+              "parent_id": "160530",
+              "title": "Physics Formula Sheet Complete PDF",
+              "type": "PDF",
+              "thumbnail": "",
+              "uploaded_at": "25-02-2026 at 06:00 pm",
+              "videos_count": 0,
+              "files_count": 0,
+              "pdf_link_enc": "demo_pdf_5"
+            },
+            {
+              "id": "160532",
+              "parent_id": "160530",
+              "title": "Chemistry Organic Reactions Notes",
+              "type": "PDF",
+              "thumbnail": "",
+              "uploaded_at": "26-02-2026 at 06:00 pm",
+              "videos_count": 0,
+              "files_count": 0,
+              "pdf_link_enc": "demo_pdf_6"
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "id": "109599",
+      "parent_id": "-1",
+      "title": "Physics (भौतिकी) - 2027",
+      "type": "FOLDER",
+      "thumbnail": "",
+      "videos_count": 4,
+      "files_count": 4,
+      "children": [
+        {
+          "id": "109600",
+          "parent_id": "109599",
+          "title": "Chapter 1 - वैद्युत आवेश तथा क्षेत्र",
+          "type": "FOLDER",
+          "thumbnail": "",
+          "videos_count": 4,
+          "files_count": 4,
+          "children": [
+            {
+              "id": "109601",
+              "parent_id": "109600",
+              "title": "Physics Syllabus 2026-27 Bihar Board",
+              "type": "VIDEO",
+              "thumbnail": "",
+              "uploaded_at": "17-02-2026 at 10:10 pm",
+              "videos_count": 0,
+              "files_count": 0,
+              "pdf_link_enc": "phys_pdf_0"
+            },
+            {
+              "id": "109602",
+              "parent_id": "109600",
+              "title": "1. वैद्युत आवेश तथा क्षेत्र PART -1",
+              "type": "VIDEO",
+              "thumbnail": "",
+              "uploaded_at": "21-02-2026 at 12:47 am",
+              "videos_count": 0,
+              "files_count": 0,
+              "pdf_link_enc": "phys_pdf_1"
+            },
+            {
+              "id": "109603",
+              "parent_id": "109600",
+              "title": "1. वैद्युत आवेश तथा क्षेत्र PART -2",
+              "type": "VIDEO",
+              "thumbnail": "",
+              "uploaded_at": "24-02-2026 at 07:30 pm",
+              "videos_count": 0,
+              "files_count": 0,
+              "pdf_link_enc": "phys_pdf_2"
+            },
+            {
+              "id": "109604",
+              "parent_id": "109600",
+              "title": "1. वैद्युत आवेश तथा क्षेत्र (पत्र विद्युतदर्शी) PART -3",
+              "type": "VIDEO",
+              "thumbnail": "",
+              "uploaded_at": "25-02-2026 at 07:30 pm",
+              "videos_count": 0,
+              "files_count": 0,
+              "pdf_link_enc": "phys_pdf_3"
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "id": "109700",
+      "parent_id": "-1",
+      "title": "Chemistry (रसायन शास्त्र) - 2027",
+      "type": "FOLDER",
+      "thumbnail": "",
+      "videos_count": 2,
+      "files_count": 2,
+      "children": [
+        {
+          "id": "109701",
+          "parent_id": "109700",
+          "title": "Chapter 1 - ठोस अवस्था (Solid State)",
+          "type": "FOLDER",
+          "thumbnail": "",
+          "videos_count": 2,
+          "files_count": 2,
+          "children": [
+            {
+              "id": "109702",
+              "parent_id": "109701",
+              "title": "Chemistry Syllabus & Solid State Intro PART -1",
+              "type": "VIDEO",
+              "thumbnail": "",
+              "uploaded_at": "18-02-2026 at 06:15 pm",
+              "videos_count": 0,
+              "files_count": 0,
+              "pdf_link_enc": "chem_pdf_1"
+            }
+          ]
+        }
+      ]
+    }
+  ],
+  "videos": []
+}
