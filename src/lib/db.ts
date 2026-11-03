@@ -106,8 +106,27 @@ export interface SyncedTelegramGroupRecord {
   youtubeOnlyCount?: number;
 }
 
+/**
+ * 🔐 Student account (email/ID + scrypt password hash).
+ * Password kabhi plaintext me store nahi hota.
+ */
+export interface StudentAccountEntry {
+  id: string;
+  /** Normalised login id (lowercase email ya mobile/ID) */
+  loginId: string;
+  displayName: string;
+  passwordHash: string;
+  passwordSalt: string;
+  createdAt: string;
+  updatedAt: string;
+  lastLoginAt?: string;
+  loginCount?: number;
+  provider?: string;
+}
+
 interface LocalStoreSchema {
   user_logins: UserLoginEntry[];
+  student_accounts?: Record<string, StudentAccountEntry>;
   video_embeds: Record<string, VideoEmbedEntry>;
   site_settings: Partial<SiteDynamicSettings>;
   batch_meta: Record<string, BatchOrderMeta>;
@@ -265,6 +284,7 @@ function getInitialSeedEmbeds(): Record<string, VideoEmbedEntry> {
 function readLocalStore(): LocalStoreSchema {
   const defaultStore: LocalStoreSchema = {
     user_logins: [],
+    student_accounts: {},
     video_embeds: getInitialSeedEmbeds(),
     site_settings: {},
     batch_meta: {},
@@ -448,6 +468,162 @@ export async function saveUserLoginToDb(entry: UserLoginEntry): Promise<void> {
     ...payload,
   });
   writeLocalStore(store);
+}
+
+// ============================================================================
+// 1b. STUDENT ACCOUNTS (email/ID + hashed password)  —  auto register login
+// ============================================================================
+function safeAccountKey(loginId: string): string {
+  return safeRtdbKey(loginId.toLowerCase());
+}
+
+export async function getStudentAccount(
+  loginId: string
+): Promise<StudentAccountEntry | null> {
+  const key = safeAccountKey(loginId);
+  if (!key) return null;
+  const path = `student_accounts/${key}`;
+
+  const rtdb = getAdminRtdb();
+  if (rtdb) {
+    try {
+      const snap = await withTimeout(rtdb.ref(path).get(), 5000);
+      if (snap.exists()) {
+        const val = snap.val() as StudentAccountEntry;
+        return { ...val, id: val.id || key, loginId: val.loginId || key };
+      }
+      return null;
+    } catch (err) {
+      lastDbError = err instanceof Error ? err.message : String(err);
+    }
+  }
+
+  const webDb = getServerWebRtdb();
+  if (webDb) {
+    try {
+      const snap = await withTimeout(webGet(webRef(webDb, path)), 5000);
+      if (snap.exists()) {
+        const val = snap.val() as StudentAccountEntry;
+        return { ...val, id: val.id || key, loginId: val.loginId || key };
+      }
+      return null;
+    } catch (err) {
+      lastDbError = err instanceof Error ? err.message : String(err);
+    }
+  }
+
+  const store = readLocalStore();
+  return store.student_accounts?.[key] || null;
+}
+
+export async function saveStudentAccount(
+  entry: StudentAccountEntry
+): Promise<void> {
+  const key = safeAccountKey(entry.loginId);
+  if (!key) throw new Error("Invalid login id");
+  const path = `student_accounts/${key}`;
+  // DB key RTDB-safe hoti hai (. / @ hata dete hain) par original loginId
+  // (email/mobile) waise hi save hota hai taaki admin panel me sahi dikhe.
+  const payload: StudentAccountEntry = { ...entry, id: key };
+
+  const rtdb = getAdminRtdb();
+  if (rtdb) {
+    try {
+      await withTimeout(rtdb.ref(path).set(payload), 5000);
+      return;
+    } catch (err) {
+      lastDbError = err instanceof Error ? err.message : String(err);
+    }
+  }
+
+  const webDb = getServerWebRtdb();
+  if (webDb) {
+    try {
+      await withTimeout(webSet(webRef(webDb, path), payload), 5000);
+      return;
+    } catch (err) {
+      lastDbError = err instanceof Error ? err.message : String(err);
+    }
+  }
+
+  const store = readLocalStore();
+  const accounts = store.student_accounts || {};
+  accounts[key] = payload;
+  store.student_accounts = accounts;
+  writeLocalStore(store);
+}
+
+export async function getAllStudentAccounts(): Promise<StudentAccountEntry[]> {
+  const rtdb = getAdminRtdb();
+  if (rtdb) {
+    try {
+      const snap = await withTimeout(
+        rtdb.ref("student_accounts").get(),
+        5000
+      );
+      if (!snap.exists()) return [];
+      const val = snap.val() as Record<string, StudentAccountEntry>;
+      return Object.entries(val)
+        .map(([id, data]) => ({ ...data, id }))
+        .sort((a, b) => (b.createdAt || "").localeCompare(a.createdAt || ""));
+    } catch (err) {
+      lastDbError = err instanceof Error ? err.message : String(err);
+    }
+  }
+
+  const webDb = getServerWebRtdb();
+  if (webDb) {
+    try {
+      const snap = await withTimeout(
+        webGet(webRef(webDb, "student_accounts")),
+        5000
+      );
+      if (!snap.exists()) return [];
+      const val = snap.val() as Record<string, StudentAccountEntry>;
+      return Object.entries(val)
+        .map(([id, data]) => ({ ...data, id }))
+        .sort((a, b) => (b.createdAt || "").localeCompare(a.createdAt || ""));
+    } catch (err) {
+      lastDbError = err instanceof Error ? err.message : String(err);
+    }
+  }
+
+  const store = readLocalStore();
+  return Object.values(store.student_accounts || {}).sort((a, b) =>
+    (b.createdAt || "").localeCompare(a.createdAt || "")
+  );
+}
+
+export async function deleteStudentAccount(loginId: string): Promise<void> {
+  const key = safeAccountKey(loginId);
+  if (!key) return;
+  const path = `student_accounts/${key}`;
+
+  const rtdb = getAdminRtdb();
+  if (rtdb) {
+    try {
+      await withTimeout(rtdb.ref(path).remove(), 5000);
+      return;
+    } catch (err) {
+      lastDbError = err instanceof Error ? err.message : String(err);
+    }
+  }
+
+  const webDb = getServerWebRtdb();
+  if (webDb) {
+    try {
+      await withTimeout(webRemove(webRef(webDb, path)), 5000);
+      return;
+    } catch (err) {
+      lastDbError = err instanceof Error ? err.message : String(err);
+    }
+  }
+
+  const store = readLocalStore();
+  if (store.student_accounts?.[key]) {
+    delete store.student_accounts[key];
+    writeLocalStore(store);
+  }
 }
 
 export async function getAdminSavedUserLogins(): Promise<UserLoginEntry[]> {

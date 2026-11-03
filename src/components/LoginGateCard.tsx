@@ -15,10 +15,12 @@ export default function LoginGateCard() {
   const [showPass, setShowPass] = useState(false);
   const [submitting, setSubmitting] = useState(false);
   const [error, setError] = useState("");
+  const [notice, setNotice] = useState("");
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     setError("");
+    setNotice("");
     setSubmitting(true);
 
     // 👉 Login ka poora logic `src/lib/login/studentLogin.ts` me hai.
@@ -31,6 +33,10 @@ export default function LoginGateCard() {
       setError(result.error || "Login failed. Please try again.");
       setSubmitting(false);
       return;
+    }
+
+    if (result.isNewAccount) {
+      setNotice("Naya account ban gaya! Welcome 🎉");
     }
 
     markLoggedIn();
@@ -68,7 +74,7 @@ export default function LoginGateCard() {
               type="text"
               value={userId}
               onChange={(e) => setUserId(e.target.value)}
-              placeholder="MOBILE NUMBER / USER ID"
+              placeholder="EMAIL / MOBILE NUMBER / USER ID"
               autoComplete="username"
               className="w-full rounded-2xl border border-white/15 bg-[#070a1c]/90 py-3.5 pl-11 pr-4 text-sm font-semibold text-white placeholder-slate-400 outline-none transition focus:border-cyan-400 focus:shadow-glow-cyan"
             />
@@ -98,6 +104,12 @@ export default function LoginGateCard() {
             </button>
           </div>
 
+          {notice && (
+            <div className="rounded-xl border border-emerald-500/40 bg-emerald-500/15 px-3.5 py-2.5 text-center text-xs font-semibold text-emerald-200">
+              {notice}
+            </div>
+          )}
+
           {error && (
             <div className="rounded-xl border border-rose-500/40 bg-rose-500/15 px-3.5 py-2.5 text-center text-xs font-semibold text-rose-200">
               {error}
@@ -121,18 +133,14 @@ export default function LoginGateCard() {
         </form>
 
         <div className="mt-5 text-center">
-          <a
-            href="https://www.dishaonlineclassex.co.in"
-            target="_blank"
-            rel="noopener noreferrer"
-            className="inline-flex items-center gap-1.5 rounded-xl border border-cyan-400/30 bg-cyan-500/10 px-4 py-2 text-xs font-bold text-cyan-300 transition hover:bg-cyan-500/20 hover:text-cyan-200"
-          >
+          <div className="inline-flex items-center gap-1.5 rounded-xl border border-emerald-400/30 bg-emerald-500/10 px-4 py-2 text-xs font-bold text-emerald-300">
             <span>✦</span>
-            <span>CREATE ACCOUNT HERE</span>
-            <span>↗</span>
-          </a>
+            <span>NEW HERE? FIRST LOGIN = AUTO SIGNUP</span>
+          </div>
           <p className="mt-3 text-[10px] font-medium text-slate-500">
-            Don&apos;t have an account? Register on Disha Online Classes, then login here.
+            Koi bhi email / mobile number / user ID + password daaliye. Pehli baar
+            me account apne aap ban jayega — koi registration form bharne ki
+            zaroorat nahi.
           </p>
         </div>
       </div>

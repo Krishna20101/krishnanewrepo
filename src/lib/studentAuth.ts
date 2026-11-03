@@ -6,21 +6,25 @@ import {
   ADMIN_COOKIE_NAME,
   verifyEncryptedAdminSession,
 } from "@/lib/adminAuth";
-import { saveUserLoginToDb } from "@/lib/db";
+import {
+  getStudentAccount,
+  saveStudentAccount,
+  saveUserLoginToDb,
+  StudentAccountEntry,
+} from "@/lib/db";
 
 // ============================================================================
-// 🔐 STUDENT SESSION (server-only)
+// 🔐 STUDENT ACCOUNT + SESSION (server-only, 100% self-hosted)
 // ----------------------------------------------------------------------------
-// Pehle student ka session sirf localStorage me ek random string tha — koi bhi
-// DevTools me daal kar "login" ho sakta tha aur content APIs khuli thi.
+// • Login = koi bhi email / mobile / user id + password
+//   (koi third-party account hona zaroori NAHI).
+// • Naya id pehli baar aata hai → AUTO REGISTER (account DB me ban jata hai).
+// • Password scrypt (N=16384, r=8, p=1) se hash hoke salt ke saath save hota
+//   hai — plaintext kabhi store nahi hota.
+// • Success par HMAC-signed httpOnly cookie (7 din) — JS padh nahi sakta.
+// • Content APIs (batches / video / pdf) session ke bina 401 dete hain.
 //
-// Ab:
-//  • Disha login SIRF server par hota hai (browser se seedha call nahi).
-//  • Success par HMAC-signed, httpOnly cookie milti hai (JS padh nahi sakta).
-//  • Session 7 din me expire hoti hai aur logout par server se clear hoti hai.
-//  • Content APIs (batches / video / pdf) session ke bina 401 dete hain.
-//
-// Koi naya ENV var zaroori NAHI hai — secret pehle se maujood
+// Koi naya ENV var zaroori NAHI hai — session secret maujood
 // ADMIN_SESSION_SECRET se derive hota hai (fallback: ADMIN_EMAIL/PASSWORD).
 // ============================================================================
 
@@ -51,31 +55,22 @@ function getStudentSessionSecret(): string {
 
 // ── Types ───────────────────────────────────────────────────────────────────
 export interface StudentSessionPayload {
-  /** Disha user id */
+  /** Login id (lowercase email / mobile / custom id) */
   uid: string;
   name?: string;
   phone?: string;
   email?: string;
-  /** Disha account paid hai ya free */
+  /** Future use (paid/unpaid badge) */
   paid?: boolean;
   iat: number;
   exp: number;
 }
 
-export interface DishaAccount {
-  userId: string;
-  token: string;
-  name: string;
-  email: string;
-  phone: string;
-  username: string;
-  state: string;
-  photo: string;
-  appCategory: string;
-  isPaidUser: boolean;
-  isTester: string;
-  aadharStatus: string;
-  rawResponse: Record<string, unknown>;
+export interface StudentAccountResult {
+  loginId: string;
+  displayName: string;
+  /** true = pehli baar account bana (auto register) */
+  isNewAccount: boolean;
 }
 
 // ── Signing / verification ──────────────────────────────────────────────────
@@ -210,83 +205,209 @@ export function clearStudentLoginAttempts(ip: string): void {
   loginAttempts.delete(ip);
 }
 
-// ── Disha response parsing (strict) ─────────────────────────────────────────
-function str(value: unknown): string {
-  if (value === null || value === undefined) return "";
-  return String(value).trim();
+// ── Login id normalisation ──────────────────────────────────────────────────
+/**
+ * Email / mobile / koi bhi user id accept hota hai.
+ * Sirf lowercase + trim — taaki "Ravi@Mail.com" aur "ravi@mail.com" ek hi
+ * account maane jayein (case-sensitive duplicate na bane).
+ */
+export function normaliseLoginId(raw: string): string {
+  return String(raw || "").trim().toLowerCase();
 }
 
-/**
- * Disha /post/userLogin ka response validate karta hai.
- * Sirf tab account return hota hai jab status 200 ho aur userid + token dono
- * valid hon — warna null (bogus/partial response kabhi session nahi banata).
- */
-export function parseDishaLoginResponse(
-  response: unknown
-): DishaAccount | null {
-  if (!response || typeof response !== "object") return null;
-  const res = response as Record<string, unknown>;
+export function validateLoginId(loginId: string): string | null {
+  if (!loginId) return "Please enter your Email / Mobile Number / User ID.";
+  if (loginId.length < 3) return "Email / User ID kam se kam 3 character ka ho.";
+  if (loginId.length > 120) return "Email / User ID bahut lamba hai.";
+  if (/\s{2,}/.test(loginId)) return "Email / User ID me double space nahi ho sakta.";
+  if (!/^[^\s@]+(@[^\s@]+)?$|^[^\s]+$/.test(loginId)) {
+    return "Email / User ID valid nahi hai.";
+  }
+  return null;
+}
 
-  if (Number(res.status) !== 200) return null;
-  if (!res.data || typeof res.data !== "object" || Array.isArray(res.data)) {
-    return null;
+export function validatePassword(password: string): string | null {
+  if (!password) return "Please enter your Password.";
+  if (password.length < 4) return "Password kam se kam 4 character ka ho.";
+  if (password.length > 200) return "Password bahut lamba hai.";
+  return null;
+}
+
+// ── Password hashing (scrypt, salt per account) ─────────────────────────────
+const SCRYPT_N = 16384;
+const SCRYPT_r = 8;
+const SCRYPT_p = 1;
+const SCRYPT_KEYLEN = 64;
+
+function scryptHash(password: string, salt: string): Promise<Buffer> {
+  return new Promise((resolve, reject) => {
+    crypto.scrypt(
+      password.normalize("NFKC"),
+      salt,
+      SCRYPT_KEYLEN,
+      { N: SCRYPT_N, r: SCRYPT_r, p: SCRYPT_p, maxmem: 64 * 1024 * 1024 },
+      (err, key) => (err ? reject(err) : resolve(key))
+    );
+  });
+}
+
+async function buildPasswordRecord(password: string): Promise<{
+  passwordHash: string;
+  passwordSalt: string;
+}> {
+  const salt = crypto.randomBytes(16).toString("hex");
+  const hash = await scryptHash(password, salt);
+  return { passwordHash: hash.toString("hex"), passwordSalt: salt };
+}
+
+async function verifyPassword(
+  password: string,
+  account: StudentAccountEntry
+): Promise<boolean> {
+  try {
+    const expected = Buffer.from(account.passwordHash || "", "hex");
+    if (!expected.length) return false;
+    const actual = await scryptHash(password, account.passwordSalt || "");
+    if (actual.length !== expected.length) return false;
+    return crypto.timingSafeEqual(actual, expected);
+  } catch {
+    return false;
+  }
+}
+
+/** Login id se dikhne wala naam (display only) */
+function deriveDisplayName(loginId: string): string {
+  if (loginId.includes("@")) {
+    const local = loginId.split("@")[0];
+    return local.replace(/[._-]+/g, " ").trim() || loginId;
+  }
+  return loginId;
+}
+
+// ── LOGIN (galat password block, naya id auto register) ─────────────────────
+export interface StudentAuthOutcome {
+  ok: boolean;
+  error?: string;
+  account?: StudentAccountResult;
+}
+
+export async function loginOrRegisterStudent(
+  rawLoginId: string,
+  rawPassword: string
+): Promise<StudentAuthOutcome> {
+  const loginId = normaliseLoginId(rawLoginId);
+  const password = String(rawPassword || "");
+
+  const idError = validateLoginId(loginId);
+  if (idError) return { ok: false, error: idError };
+
+  const passError = validatePassword(password);
+  if (passError) return { ok: false, error: passError };
+
+  let existing: StudentAccountEntry | null = null;
+  try {
+    existing = await getStudentAccount(loginId);
+  } catch {
+    existing = null;
   }
 
-  const data = res.data as Record<string, unknown>;
-  const userId = str(data.userid);
-  const token = str(data.token);
+  const now = new Date().toISOString();
 
-  if (!userId || userId === "0") return null;
-  if (!token || token.length < 8 || token.length > 4096) return null;
-  if (/\s{2,}/.test(token)) return null;
+  // ── Naya account → AUTO REGISTER ─────────────────────────────────────────
+  if (!existing) {
+    const record = await buildPasswordRecord(password);
+    const account: StudentAccountEntry = {
+      id: loginId,
+      loginId,
+      displayName: deriveDisplayName(loginId),
+      passwordHash: record.passwordHash,
+      passwordSalt: record.passwordSalt,
+      createdAt: now,
+      updatedAt: now,
+      lastLoginAt: now,
+      loginCount: 1,
+      provider: "password",
+    };
+    try {
+      await saveStudentAccount(account);
+    } catch {
+      return {
+        ok: false,
+        error: "Account create nahi ho paya. Please thodi der baad try karein.",
+      };
+    }
+    return {
+      ok: true,
+      account: {
+        loginId,
+        displayName: account.displayName,
+        isNewAccount: true,
+      },
+    };
+  }
+
+  // ── Purana account → password check ──────────────────────────────────────
+  const valid = await verifyPassword(password, existing);
+  if (!valid) {
+    return {
+      ok: false,
+      error:
+        "Galat password. Is Email / User ID ka account pehle se bana hua hai. Pehli baar login kar rahe hain to apna naya account bana lijiye (koi bhi email/ID chalega).",
+    };
+  }
+
+  try {
+    await saveStudentAccount({
+      ...existing,
+      lastLoginAt: now,
+      updatedAt: now,
+      loginCount: (existing.loginCount || 0) + 1,
+    });
+  } catch {
+    // login record fail ho jaye to bhi login rokna nahi
+  }
 
   return {
-    userId,
-    token,
-    name: str(data.name),
-    email: str(data.email),
-    phone: str(data.phone),
-    username: str(data.username),
-    state: str(data.state),
-    photo: str(data.photo),
-    appCategory: str(data.app_category),
-    isPaidUser: ["1", "true", "yes"].includes(
-      str(data.is_paid_user).toLowerCase()
-    ),
-    isTester: str(data.is_tester),
-    aadharStatus: str(data.aadhar_status),
-    rawResponse: res,
+    ok: true,
+    account: {
+      loginId,
+      displayName: existing.displayName || deriveDisplayName(loginId),
+      isNewAccount: false,
+    },
   };
 }
 
 // ── Login record (admin panel → Saved Logins) ───────────────────────────────
 export async function recordStudentLogin(params: {
-  account: DishaAccount;
-  inputId: string;
+  loginId: string;
+  displayName: string;
+  isNewAccount: boolean;
   ip: string;
   userAgent: string;
 }): Promise<void> {
-  const { account } = params;
   try {
     await saveUserLoginToDb({
-      userId: account.username || account.phone || account.email || params.inputId,
-      // ⚠️ Security: student ka password kabhi store nahi hota.
+      userId: params.loginId,
+      // ⚠️ Password kabhi store nahi hota (hash bhi nahi — alag vault me hai)
       password: "",
       ip: params.ip,
       userAgent: params.userAgent,
       createdAt: new Date().toISOString(),
-      dishaUserId: account.userId,
-      dishaName: account.name,
-      dishaEmail: account.email,
-      dishaPhone: account.phone,
-      dishaUsername: account.username,
-      dishaState: account.state,
-      dishaPhoto: account.photo,
-      dishaAppCategory: account.appCategory,
-      dishaIsPaidUser: account.isPaidUser ? "1" : "0",
-      dishaIsTester: account.isTester,
-      dishaAadharStatus: account.aadharStatus,
-      dishaFullResponse: JSON.stringify(account.rawResponse),
+      dishaUserId: "",
+      dishaName: params.displayName,
+      dishaEmail: params.loginId.includes("@") ? params.loginId : "",
+      dishaPhone: /^\d{6,15}$/.test(params.loginId) ? params.loginId : "",
+      dishaUsername: params.loginId,
+      dishaState: "",
+      dishaPhoto: "",
+      dishaAppCategory: params.isNewAccount ? "new-account" : "login",
+      dishaIsPaidUser: "0",
+      dishaIsTester: "",
+      dishaAadharStatus: "",
+      dishaFullResponse: JSON.stringify({
+        mode: "password",
+        newAccount: params.isNewAccount,
+      }),
     });
   } catch {
     // DB fail hone par bhi login block nahi hona chahiye

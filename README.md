@@ -19,7 +19,19 @@
 | 7 | Sirf `JSON Merge` chunne par neeche list nahi aati thi | Ab **har sync ka record hamesha save hota hai** — success, partial ya error. Neeche `Synced Telegram Groups` list hamesha dikhti hai (status badge + reason + `Re-Sync` + `Open Course` + `Delete Course` + `Remove Record`). |
 | 8 | PDF "kahi kahi khulta nahi", ek saath pura load hota tha | Naya **ProgressivePdfViewer** (pdf.js range requests): pehla page ~300-500KB me khulta hai, baaki pages **scroll par** aate hain. Door ke pages ka canvas RAM se free (max 8 live canvas) → low-RAM phone par bhi smooth. Zoom, page-jump, fullscreen, `Please wait, page N load ho raha hai...` |
 | 9 | Download browser me chala jata tha (koi bhi copy kar sakta tha) | Ab **In-App Offline Vault** (IndexedDB): file phone ke Downloads folder me **nahi** jati. Lecture website ke andar hi save hota hai aur **internet band hone par bhi** wahi se chalta hai. Download **resumable** (Pause/Resume), chunk-wise disk write (RAM flat), storage meter `/downloads` par. |
-| 10 | Login system alag rakhna tha | Poora student login ek file me: **`src/lib/login/studentLogin.ts`** (+ admin: `src/lib/login/adminLogin.ts`). Baad me OTP/Firebase/paid-check lagana ho to sirf wahi file badlein. |
+| 10 | Login system alag rakhna tha | Poora student login ek file me: **`src/lib/login/studentLogin.ts`** + server logic **`src/lib/studentAuth.ts`**. Baad me OTP/Firebase/paid-check lagana ho to sirf wahi file badlein. |
+
+### 🔐 Naya Student Login (v4 — apna account, auto register)
+
+- **Koi bhi Email / Mobile Number / User ID + Password** chalega — Disha/Firebase ka account hona zaroori **nahi**.
+- **Pehli baar login = auto signup.** Naya ID aaya → account usi waqt ban jata hai aur seedha login ho jata hai. Koi alag registration form nahi.
+- Purana ID → password verify (galat par clean error).
+- Password **scrypt (N=16384)** hash + per-account salt ke saath DB `student_accounts` me save hota hai — **plaintext kabhi nahi**.
+- Login success par **HMAC-signed httpOnly cookie** (7 din) — localStorage me token nahi, JS se forge nahi ho sakti.
+- Brute force: per-IP **8 galat attempt = 10 min lock**.
+- Content APIs (`/api/batches`, `/api/video/*`, `/api/pdf/*`) session ke bina **401**.
+- Admin panel → naya **Accounts** tab: saare accounts (hash, count, last login, delete) — password kabhi client tak nahi jata. **Login History** tab sirf login events dikhata hai.
+- **Koi naya ENV var nahi chahiye** — session secret `ADMIN_SESSION_SECRET` se derive hota hai.
 
 ---
 
@@ -73,7 +85,8 @@
 | **Courses Studio** | Course reorder `#1,#2,#3`, `⇈ Top ↑ Up ↓ Down ⇊ Bottom`, `⭐ Important` (top pin + website par star), JSON import, blank course create. |
 | **Explorer** | Folder/Video reorder + `⭐` star, YouTube embed add, PDF link add. |
 | **Website Settings** | App name/domain, default image, Cloudflare Worker URL, announcement, video-download allow/block. |
-| **Saved Logins** | Jo students login karte hain (server-only capture). |
+| **Accounts** | Auto-register se bane student accounts — login ID, naam, kitni baar login, last login, delete. Password sirf scrypt hash ke roop me DB me. |
+| **Login History** | Har login ka record (Email/ID, IP, time). Password kabhi store nahi hota. |
 
 **Max Messages** = 1500 default. Bade group (5000+ items) ke liye 3000-5000 karein.
 
