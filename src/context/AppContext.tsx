@@ -22,10 +22,11 @@ import {
   VAULT_CHUNK_BYTES,
 } from "@/lib/clientDownloads";
 // 🔐 Student login (alag file): src/lib/login/studentLogin.ts
+// Session ab server-side httpOnly cookie me hai — localStorage me nahi.
 import {
-  clearStudentSession,
-  readStudentSession,
-  saveStudentSession,
+  fetchStudentSession,
+  logoutStudentRequest,
+  purgeLegacyStudentSession,
 } from "@/lib/login/studentLogin";
 import PleaseWaitScreen from "@/components/PleaseWaitScreen";
 
@@ -59,7 +60,14 @@ interface StartDownloadParams {
 interface AppContextValue {
   isHydrated: boolean;
   isLoggedIn: boolean;
-  markLoggedIn: (token: string) => void;
+  studentProfile: {
+    userId: string;
+    name: string;
+    phone: string;
+    email: string;
+    isPaidUser: boolean;
+  } | null;
+  markLoggedIn: () => void;
   logoutStudent: () => void;
   showTelegramPopup: boolean;
   closeTelegramPopup: () => void;
@@ -108,6 +116,13 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
 
   const [isHydrated, setIsHydrated] = useState(false);
   const [isLoggedIn, setIsLoggedIn] = useState(false);
+  const [studentProfile, setStudentProfile] = useState<{
+    userId: string;
+    name: string;
+    phone: string;
+    email: string;
+    isPaidUser: boolean;
+  } | null>(null);
   const [showTelegramPopup, setShowTelegramPopup] = useState(false);
   const [wishlistIds, setWishlistIds] = useState<string[]>([]);
   const [pdfModalTitle, setPdfModalTitle] = useState<string | null>(null);
@@ -147,12 +162,33 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
     }
   }, []);
 
+  // 🔐 HttpOnly cookie se session verify (localStorage par bharosa nahi)
+  useEffect(() => {
+    let active = true;
+
+    const hydrateStudentSession = async () => {
+      purgeLegacyStudentSession();
+      const session = await fetchStudentSession(SITE_CONFIG.apiBaseUrl);
+      if (!active) return;
+      if (session.loggedIn) {
+        setIsLoggedIn(true);
+        setStudentProfile(session.student || null);
+      } else {
+        setIsLoggedIn(false);
+        setStudentProfile(null);
+      }
+      setIsHydrated(true);
+    };
+
+    hydrateStudentSession();
+
+    return () => {
+      active = false;
+    };
+  }, []);
+
   useEffect(() => {
     try {
-      const savedToken = readStudentSession();
-      if (savedToken) {
-        setIsLoggedIn(true);
-      }
       const savedWish = localStorage.getItem(STORAGE_WISHLIST_KEY);
       if (savedWish) {
         const parsed = JSON.parse(savedWish);
@@ -168,8 +204,6 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
       setDownloadsList(cleanedDls);
     } catch {
       // ignore
-    } finally {
-      setIsHydrated(true);
     }
     refreshConfig();
   }, [refreshConfig]);
@@ -372,22 +406,25 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
     [updateDownloadsState]
   );
 
-  const markLoggedIn = useCallback(
-    (token: string) => {
-      saveStudentSession(token);
-      setIsLoggedIn(true);
-      if (config.telegramPopupEnabled !== false) {
-        setShowTelegramPopup(true);
-      }
-    },
-    [config.telegramPopupEnabled]
-  );
+  const markLoggedIn = useCallback(() => {
+    setIsLoggedIn(true);
+    // Profile server se sync (httpOnly cookie already set hai)
+    fetchStudentSession(SITE_CONFIG.apiBaseUrl).then((session) => {
+      if (session.loggedIn) setStudentProfile(session.student || null);
+    });
+    if (config.telegramPopupEnabled !== false) {
+      setShowTelegramPopup(true);
+    }
+  }, [config.telegramPopupEnabled]);
 
   const logoutStudent = useCallback(() => {
-    clearStudentSession();
+    // Cookie server se clear + UI turant logout
+    void logoutStudentRequest(SITE_CONFIG.apiBaseUrl);
     setIsLoggedIn(false);
+    setStudentProfile(null);
     setShowTelegramPopup(false);
-  }, []);
+    router.push("/");
+  }, [router]);
 
   const closeTelegramPopup = useCallback(() => {
     setShowTelegramPopup(false);
@@ -425,6 +462,7 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
       value={{
         isHydrated,
         isLoggedIn,
+        studentProfile,
         markLoggedIn,
         logoutStudent,
         showTelegramPopup,

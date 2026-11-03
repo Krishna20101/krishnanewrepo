@@ -27,13 +27,13 @@ export default function LoginGateCard() {
       SITE_CONFIG.apiBaseUrl
     );
 
-    if (!result.ok || !result.sessionToken) {
+    if (!result.ok) {
       setError(result.error || "Login failed. Please try again.");
       setSubmitting(false);
       return;
     }
 
-    markLoggedIn(result.sessionToken);
+    markLoggedIn();
     setSubmitting(false);
   };
 

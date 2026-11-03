@@ -1,45 +1,128 @@
 import { NextRequest, NextResponse } from "next/server";
-import crypto from "crypto";
-import { saveUserLoginToDb } from "@/lib/db";
+import {
+  DishaAccount,
+  checkStudentLoginRateLimit,
+  clearStudentLoginAttempts,
+  createStudentSession,
+  getClientIp,
+  parseDishaLoginResponse,
+  recordStudentLogin,
+  recordStudentLoginFailure,
+  studentCookieOptions,
+  STUDENT_COOKIE_NAME,
+} from "@/lib/studentAuth";
 
 export const dynamic = "force-dynamic";
+export const runtime = "nodejs";
 
-const DISHA_API = "https://dishaonlineclassesapi.classx.co.in";
+// ============================================================================
+// POST /api/auth/login — Disha 2-step login (SERVER-SIDE, same as do_login()
+// in dishaplayer.py):
+//   Step 1 → POST /post/userLogin             (okhttp headers)
+//     status 200 → done
+//     status 203 → Step 2
+//   Step 2 → POST /post/userLogin?extra_details=0 (website headers)
+//     status 200 → done
+//     else      → error
+//
+// Browser se seedha Disha call karne ki zaroorat nahi — CORS/User-Agent ki
+// dikkat khatam, aur token httpOnly cookie me safely set hota hai.
+// ============================================================================
+
+// Testing ke liye override (default: production Disha API — Vercel par kuch
+// set karne ki zaroorat nahi hai)
+const DISHA_API = (
+  process.env.DISHA_API_BASE_URL || "https://dishaonlineclassesapi.classx.co.in"
+).replace(/\/$/, "");
 const MOBILE_UA =
   "Mozilla/5.0 (Linux; Android 13) AppleWebKit/537.36 Chrome/120.0.0.0 Mobile Safari/537.36";
+const REQUEST_TIMEOUT_MS = 20000;
 
-/**
- * POST /api/auth/login
- * Same 2-step login as dishaplayer.py do_login():
- *   Step 1 → POST /post/userLogin                         (okhttp headers)
- *     status 200 + data → done
- *     status 203        → Step 2
- *   Step 2 → POST /post/userLogin?extra_details=0         (website headers)
- *     status 200 + data → done
- */
+async function postForm(
+  path: string,
+  body: URLSearchParams,
+  headers: Record<string, string>
+): Promise<Record<string, unknown>> {
+  const controller = new AbortController();
+  const timer = setTimeout(() => controller.abort(), REQUEST_TIMEOUT_MS);
+  try {
+    const res = await fetch(`${DISHA_API}${path}`, {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/x-www-form-urlencoded",
+        ...headers,
+      },
+      body: body.toString(),
+      signal: controller.signal,
+      cache: "no-store",
+    });
+
+    const text = await res.text();
+    try {
+      return JSON.parse(text) as Record<string, unknown>;
+    } catch {
+      // Kabhi kabhi HTML/JSON mixed aata hai — pehla {...} nikal lo
+      const match = text.match(/\{[\s\S]*\}/);
+      if (match) {
+        try {
+          return JSON.parse(match[0]) as Record<string, unknown>;
+        } catch {
+          /* ignore */
+        }
+      }
+      return {};
+    }
+  } finally {
+    clearTimeout(timer);
+  }
+}
+
 export async function POST(req: NextRequest) {
+  const ip = getClientIp(req);
+
+  // ── Rate limit (brute force se bachao) ───────────────────────────────────
+  const rate = checkStudentLoginRateLimit(ip);
+  if (!rate.allowed) {
+    return NextResponse.json(
+      {
+        ok: false,
+        error: `Bahut zyada galat koshish. ${Math.ceil(
+          (rate.retryAfterSec || 60) / 60
+        )} minute baad try karein.`,
+      },
+      { status: 429 }
+    );
+  }
+
   try {
     const body = await req.json().catch(() => ({}));
-    const email = String(body?.userId || body?.email || body?.mobile || body?.phone || "").trim();
-    const password = String(body?.password || "");
+    const inputId = String(
+      body?.userId || body?.email || body?.mobile || ""
+    ).trim();
+    const password = String(body?.password || "").trim();
 
-    if (!email || !password.trim()) {
+    if (!inputId || !password) {
       return NextResponse.json(
         { ok: false, error: "Please enter Mobile Number / ID and Password." },
         { status: 400 }
       );
     }
 
-    if (email.length > 120 || password.length > 200) {
+    if (inputId.length > 120 || password.length > 200) {
       return NextResponse.json(
         { ok: false, error: "Invalid input length." },
         { status: 400 }
       );
     }
 
-    let d1: Record<string, unknown> = {};
+    // ── STEP 1 ────────────────────────────────────────────────────────────
+    let step1: Record<string, unknown> = {};
     try {
-      d1 = await dishaPost("post/userLogin", { email, password }, {
+      const step1Body = new URLSearchParams();
+      step1Body.append("email", inputId);
+      step1Body.append("password", password);
+
+      step1 = await postForm("/post/userLogin", step1Body, {
         "Auth-Key": "appxapi",
         "User-Id": "-2",
         Authorization: "",
@@ -53,20 +136,26 @@ export async function POST(req: NextRequest) {
       );
     }
 
-    if (isOk(d1)) return await finishLogin(req, email, password, d1);
+    // Step 1 success
+    const accountStep1 = parseDishaLoginResponse(step1);
+    if (accountStep1) {
+      return await finishLogin(req, accountStep1, inputId, ip);
+    }
 
-    if (statusOf(d1) === 203) {
-      let d2: Record<string, unknown> = {};
+    // ── STEP 2 (status 203 → website flow) ─────────────────────────────────
+    if (Number(step1?.status) === 203) {
+      let step2: Record<string, unknown> = {};
       try {
-        d2 = await dishaPost(
-          "post/userLogin?extra_details=0",
-          {
-            source: "website",
-            phone: email,
-            email,
-            password,
-            extra_details: "1",
-          },
+        const step2Body = new URLSearchParams();
+        step2Body.append("source", "website");
+        step2Body.append("phone", inputId);
+        step2Body.append("email", inputId);
+        step2Body.append("password", password);
+        step2Body.append("extra_details", "1");
+
+        step2 = await postForm(
+          "/post/userLogin?extra_details=0",
+          step2Body,
           {
             "auth-key": "appxapi",
             "client-service": "Appx",
@@ -77,20 +166,32 @@ export async function POST(req: NextRequest) {
         );
       } catch {
         return NextResponse.json(
-          { ok: false, error: "Could not reach Disha servers. Please try again." },
+          {
+            ok: false,
+            error: "Could not reach Disha servers. Please try again.",
+          },
           { status: 502 }
         );
       }
 
-      if (isOk(d2)) return await finishLogin(req, email, password, d2);
+      const accountStep2 = parseDishaLoginResponse(step2);
+      if (accountStep2) {
+        return await finishLogin(req, accountStep2, inputId, ip);
+      }
 
-      return NextResponse.json(
-        { ok: false, error: messageOf(d2) },
-        { status: 401 }
-      );
+      recordStudentLoginFailure(ip);
+      const msg =
+        String(step2?.message || "").trim() ||
+        "Invalid User ID / Mobile Number or Password.";
+      return NextResponse.json({ ok: false, error: msg }, { status: 401 });
     }
 
-    return NextResponse.json({ ok: false, error: messageOf(d1) }, { status: 401 });
+    // Kuch aur status — Disha ka message ya generic error
+    recordStudentLoginFailure(ip);
+    const errMsg =
+      String(step1?.message || "").trim() ||
+      "Invalid User ID / Mobile Number or Password.";
+    return NextResponse.json({ ok: false, error: errMsg }, { status: 401 });
   } catch {
     return NextResponse.json(
       { ok: false, error: "Unable to process login right now." },
@@ -99,105 +200,42 @@ export async function POST(req: NextRequest) {
   }
 }
 
-async function dishaPost(
-  path: string,
-  fields: Record<string, string>,
-  headers: Record<string, string>
-): Promise<Record<string, unknown>> {
-  const body = new URLSearchParams();
-  for (const [key, value] of Object.entries(fields)) body.append(key, value);
-
-  const res = await fetch(`${DISHA_API}/${path.replace(/^\//, "")}`, {
-    method: "POST",
-    headers: {
-      "Content-Type": "application/x-www-form-urlencoded",
-      Accept: "application/json, text/plain, */*",
-      ...headers,
-    },
-    body: body.toString(),
-    cache: "no-store",
-  });
-
-  const text = await res.text();
-  try {
-    const parsed = JSON.parse(text) as unknown;
-    if (parsed && typeof parsed === "object") return parsed as Record<string, unknown>;
-  } catch {
-    const match = text.match(/\{[\s\S]*\}/);
-    if (match) {
-      try {
-        const parsed = JSON.parse(match[0]) as unknown;
-        if (parsed && typeof parsed === "object") return parsed as Record<string, unknown>;
-      } catch {
-        /* fall through */
-      }
-    }
-  }
-  return { status: res.status, message: text.slice(0, 180) || "Empty response from Disha." };
-}
-
-function statusOf(data: Record<string, unknown>): number {
-  const n = Number(data?.status);
-  return Number.isFinite(n) ? n : 0;
-}
-
-function isOk(data: Record<string, unknown>): boolean {
-  return statusOf(data) === 200 && Boolean(data?.data) && typeof data.data === "object";
-}
-
-function messageOf(data: Record<string, unknown>): string {
-  const msg = String(data?.message || data?.msg || "").trim();
-  return msg || "Invalid User ID / Mobile Number or Password.";
-}
-
 async function finishLogin(
   req: NextRequest,
-  email: string,
-  password: string,
-  dishaData: Record<string, unknown>
+  account: DishaAccount,
+  inputId: string,
+  ip: string
 ) {
-  const ip =
-    req.headers.get("x-forwarded-for")?.split(",")[0]?.trim() ||
-    req.headers.get("x-real-ip") ||
-    "unknown";
-  const userAgent = req.headers.get("user-agent") || "unknown";
+  clearStudentLoginAttempts(ip);
 
-  const u =
-    dishaData?.data && typeof dishaData.data === "object"
-      ? (dishaData.data as Record<string, unknown>)
-      : {};
-
-  try {
-    await saveUserLoginToDb({
-      userId: email,
-      password,
-      ip,
-      userAgent,
-      createdAt: new Date().toISOString(),
-      dishaUserId: String(u?.userid || ""),
-      dishaName: String(u?.name || ""),
-      dishaEmail: String(u?.email || ""),
-      dishaPhone: String(u?.phone || ""),
-      dishaUsername: String(u?.username || ""),
-      dishaState: String(u?.state || ""),
-      dishaToken: String(u?.token || ""),
-      dishaPhoto: String(u?.photo || ""),
-      dishaAppCategory: String(u?.app_category || ""),
-      dishaIsPaidUser: String(u?.is_paid_user || "0"),
-      dishaIsTester: String(u?.is_tester ?? ""),
-      dishaAadharStatus: String(u?.aadhar_status || ""),
-      dishaFullResponse: JSON.stringify(dishaData),
-    });
-  } catch {
-    // Login still succeeds if the login log cannot be written.
-  }
-
-  const sessionToken = crypto.randomBytes(24).toString("hex");
-  return NextResponse.json({
-    ok: true,
-    sessionToken,
-    loginTime: Date.now(),
-    dishaUserId: String(u?.userid || ""),
-    name: String(u?.name || ""),
+  // Admin panel ke "Saved Logins" ke liye record (password store NAHI hota)
+  await recordStudentLogin({
+    account,
+    inputId,
+    ip,
+    userAgent: req.headers.get("user-agent") || "unknown",
   });
+
+  const sessionToken = createStudentSession({
+    uid: account.userId,
+    name: account.name,
+    phone: account.phone,
+    email: account.email,
+    paid: account.isPaidUser,
+  });
+
+  const res = NextResponse.json({
+    ok: true,
+    loginTime: Date.now(),
+    student: {
+      name: account.name,
+      phone: account.phone,
+      email: account.email,
+      userId: account.userId,
+      isPaidUser: account.isPaidUser,
+    },
+  });
+
+  res.cookies.set(STUDENT_COOKIE_NAME, sessionToken, studentCookieOptions());
+  return res;
 }

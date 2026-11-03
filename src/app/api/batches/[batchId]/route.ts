@@ -1,4 +1,5 @@
 import { NextRequest, NextResponse } from "next/server";
+import { isContentRequestAuthorized } from "@/lib/studentAuth";
 import {
   findFolderWithBreadcrumbs,
   getEffectiveRootNodes,
@@ -13,6 +14,14 @@ export async function GET(
   req: NextRequest,
   { params }: { params: { batchId: string } }
 ) {
+  // 🔐 Login ke bina folder content nahi
+  if (!isContentRequestAuthorized(req)) {
+    return NextResponse.json(
+      { ok: false, error: "Please login to continue." },
+      { status: 401 }
+    );
+  }
+
   try {
     const batchId = decodeURIComponent(params.batchId);
     const folderId = req.nextUrl.searchParams.get("folderId");
