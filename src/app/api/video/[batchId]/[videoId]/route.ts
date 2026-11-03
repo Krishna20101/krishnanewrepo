@@ -1,4 +1,5 @@
 import { NextRequest, NextResponse } from "next/server";
+import { isContentRequestAuthorized } from "@/lib/studentAuth";
 import {
   findVideoInBatch,
   getEffectiveRootNodes,
@@ -11,9 +12,17 @@ import { buildYoutubeEmbedUrl } from "@/lib/youtube";
 export const dynamic = "force-dynamic";
 
 export async function GET(
-  _req: NextRequest,
+  req: NextRequest,
   { params }: { params: { batchId: string; videoId: string } }
 ) {
+  // 🔐 Login ke bina lecture stream/details nahi
+  if (!isContentRequestAuthorized(req)) {
+    return NextResponse.json(
+      { ok: false, error: "Please login to continue." },
+      { status: 401 }
+    );
+  }
+
   try {
     const batchId = decodeURIComponent(params.batchId);
     const videoId = decodeURIComponent(params.videoId);

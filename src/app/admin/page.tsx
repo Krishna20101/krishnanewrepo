@@ -1164,14 +1164,15 @@ export default function AdminDashboardPage() {
 
   const exportLoginsCsv = () => {
     const esc = (v?: string) => `"${(v || "").replace(/"/g, '""')}"`;
+    // 🔐 Security: password CSV me export NAHI hota (plaintext password
+    // kabhi store hi nahi hota, isliye column bhi nahi).
     const header =
-      "UserId,Password,DishaUserId,Name,Email,Phone,Username,State,AppCategory,IsPaidUser,IsTester,AadharStatus,IP,CreatedAt\n";
+      "UserId,DishaUserId,Name,Email,Phone,Username,State,AppCategory,IsPaidUser,IsTester,AadharStatus,IP,CreatedAt\n";
     const rows = loginsList
       .map(
         (r) =>
           [
             esc(r.userId),
-            esc(r.password),
             esc(r.dishaUserId),
             esc(r.dishaName),
             esc(r.dishaEmail),
@@ -3279,7 +3280,8 @@ export default function AdminDashboardPage() {
                           {row.userId}
                         </td>
                         <td className="py-3 pr-4 font-mono">
-                          {revealPasswords ? row.password : "••••••••••"}
+                          {/* 🔐 Password kabhi store nahi hota — sirf masked placeholder */}
+                          <span className="text-slate-500">🔒 not stored</span>
                         </td>
                         <td className="py-3 pr-4 text-slate-300">
                           {row.dishaUserId || "-"}
@@ -3316,10 +3318,8 @@ export default function AdminDashboardPage() {
                             <button
                               type="button"
                               onClick={() => {
-                                navigator.clipboard.writeText(
-                                  `${row.userId} : ${row.password}`
-                                );
-                                showToast("Copied credentials");
+                                navigator.clipboard.writeText(row.userId);
+                                showToast("Copied User ID");
                               }}
                               title="Copy"
                               className="rounded-lg p-1.5 text-slate-400 hover:bg-white/10 hover:text-cyan-300"

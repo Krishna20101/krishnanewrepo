@@ -1,4 +1,5 @@
 import { NextRequest, NextResponse } from "next/server";
+import { isContentRequestAuthorized } from "@/lib/studentAuth";
 import {
   findPdfNodeInBatch,
   getEffectiveRootNodes,
@@ -9,9 +10,17 @@ import { getEffectiveSiteSettings } from "@/lib/db";
 export const dynamic = "force-dynamic";
 
 export async function GET(
-  _req: NextRequest,
+  req: NextRequest,
   { params }: { params: { batchId: string; pdfId: string } }
 ) {
+  // 🔐 Login ke bina PDF link nahi
+  if (!isContentRequestAuthorized(req)) {
+    return NextResponse.json(
+      { ok: false, error: "Please login to continue." },
+      { status: 401 }
+    );
+  }
+
   try {
     const batchId = decodeURIComponent(params.batchId || "");
     const pdfId = decodeURIComponent(params.pdfId || "");

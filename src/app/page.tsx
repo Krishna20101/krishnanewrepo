@@ -18,7 +18,8 @@ import PleaseWaitScreen from "@/components/PleaseWaitScreen";
 import { apiUrl } from "@/config/siteConfig";
 
 export default function HomePage() {
-  const { isHydrated, isLoggedIn, logoutStudent, config } = useApp();
+  const { isHydrated, isLoggedIn, logoutStudent, config, studentProfile } =
+    useApp();
   const [batches, setBatches] = useState<BatchSummaryUI[]>([]);
   const [loading, setLoading] = useState(true);
   const [search, setSearch] = useState("");
@@ -85,8 +86,10 @@ export default function HomePage() {
               <h1 className="bg-gradient-to-r from-cyan-300 via-indigo-300 to-purple-300 bg-clip-text text-lg sm:text-xl font-black uppercase tracking-wider text-transparent">
                 {config.appName}
               </h1>
-              <p className="text-[10px] font-bold uppercase tracking-widest text-emerald-300/90">
-                All Batches Unlocked
+              <p className="truncate text-[10px] font-bold uppercase tracking-widest text-emerald-300/90">
+                {studentProfile?.name
+                  ? `Hi, ${studentProfile.name}`
+                  : "All Batches Unlocked"}
               </p>
             </div>
           </div>

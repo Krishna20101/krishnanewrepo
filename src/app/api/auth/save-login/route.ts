@@ -1,64 +1,78 @@
 import { NextRequest, NextResponse } from "next/server";
-import crypto from "crypto";
-import { saveUserLoginToDb } from "@/lib/db";
+import {
+  recordStudentLogin,
+  studentCookieOptions,
+  STUDENT_COOKIE_NAME,
+  createStudentSession,
+  verifyStudentSession,
+} from "@/lib/studentAuth";
 
 export const dynamic = "force-dynamic";
+export const runtime = "nodejs";
 
 /**
  * POST /api/auth/save-login
- * Browser Disha API se seedha login karta hai.
- * Ye route sirf full Disha response ko Firebase me save karta hai
- * aur ek session token return karta hai.
+ *
+ * ⚠️ Ye route AB sirf "login record refresh" ke liye hai.
+ * Pehle isme client se aaya hua password store hota tha aur bina verify kiye
+ * session token mil jata tha. Ab:
+ *   • Password accept/store NAHI hota.
+ *   • Body me client jo bhi bheje, usse session nahi banti.
+ *   • Session sirf tab issue hoti hai jab valid httpOnly student session ho.
  */
 export async function POST(req: NextRequest) {
-  try {
-    const body = await req.json();
-    const email = String(body?.email || "").trim();
-    const password = String(body?.password || "").trim();
-    const dishaResponse = body?.dishaResponse as Record<string, unknown> || {};
+  const session = verifyStudentSession(
+    req.cookies.get(STUDENT_COOKIE_NAME)?.value
+  );
 
-    if (!email) {
-      return NextResponse.json({ ok: false, error: "Missing email." }, { status: 400 });
-    }
-
-    const ip =
-      req.headers.get("x-forwarded-for")?.split(",")[0]?.trim() ||
-      req.headers.get("x-real-ip") ||
-      "unknown";
-    const userAgent = req.headers.get("user-agent") || "unknown";
-
-    const u =
-      dishaResponse?.data && typeof dishaResponse.data === "object"
-        ? (dishaResponse.data as Record<string, unknown>)
-        : {};
-
-    await saveUserLoginToDb({
-      userId: email,
-      password,
-      ip,
-      userAgent,
-      createdAt: new Date().toISOString(),
-      dishaUserId: String(u?.userid || ""),
-      dishaName: String(u?.name || ""),
-      dishaEmail: String(u?.email || ""),
-      dishaPhone: String(u?.phone || ""),
-      dishaUsername: String(u?.username || ""),
-      dishaState: String(u?.state || ""),
-      dishaToken: String(u?.token || ""),
-      dishaPhoto: String(u?.photo || ""),
-      dishaAppCategory: String(u?.app_category || ""),
-      dishaIsPaidUser: String(u?.is_paid_user || "0"),
-      dishaIsTester: String(u?.is_tester ?? ""),
-      dishaAadharStatus: String(u?.aadhar_status || ""),
-      dishaFullResponse: JSON.stringify(dishaResponse),
-    });
-
-    const sessionToken = crypto.randomBytes(24).toString("hex");
-    return NextResponse.json({ ok: true, sessionToken, loginTime: Date.now() });
-  } catch {
+  if (!session) {
     return NextResponse.json(
-      { ok: false, error: "Unable to save login data." },
-      { status: 500 }
+      { ok: false, error: "Please login again." },
+      { status: 401 }
     );
   }
+
+  const body = await req.json().catch(() => ({}));
+  const dishaResponse = body?.dishaResponse;
+
+  if (dishaResponse && typeof dishaResponse === "object") {
+    await recordStudentLogin({
+      account: {
+        userId: session.uid,
+        token: "session",
+        name: session.name || "",
+        email: session.email || "",
+        phone: session.phone || "",
+        username: "",
+        state: "",
+        photo: "",
+        appCategory: "",
+        isPaidUser: Boolean(session.paid),
+        isTester: "",
+        aadharStatus: "",
+        rawResponse: dishaResponse as Record<string, unknown>,
+      },
+      inputId: session.uid,
+      ip:
+        req.headers.get("x-forwarded-for")?.split(",")[0]?.trim() ||
+        req.headers.get("x-real-ip") ||
+        "unknown",
+      userAgent: req.headers.get("user-agent") || "unknown",
+    });
+  }
+
+  const res = NextResponse.json({ ok: true });
+  // Session rotate = security upgrade
+  res.cookies.set(
+    STUDENT_COOKIE_NAME,
+    createStudentSession({
+      uid: session.uid,
+      name: session.name,
+      phone: session.phone,
+      email: session.email,
+      paid: session.paid,
+    }),
+    studentCookieOptions()
+  );
+  return res;
 }
