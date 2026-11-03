@@ -3,14 +3,15 @@
 // ============================================================================
 // 🔐 STUDENT LOGIN MODULE
 // ----------------------------------------------------------------------------
-// Flow (sab kuch hamare apne server se, browser se seedha Disha call NAHI):
-//   1. POST /api/auth/login  → server Disha ka 2-step login karta hai
-//      (Step 1 okhttp headers, status 203 par Step 2 website headers)
-//   2. Success → server httpOnly signed cookie set karta hai
+// Flow (sab kuch hamare apne server se):
+//   1. POST /api/auth/login  → server account check karta hai
+//        • naya email/ID  → AUTO REGISTER (account ban jata hai)
+//        • purana account → scrypt password verify
+//   2. Success → server HMAC-signed httpOnly cookie set karta hai (7 din)
 //   3. Session confirm → GET /api/auth/session
 //
-// Pehle browser se seedha API call hoti thi (CORS + User-Agent ki wajah se
-// fail hoti thi) aur localStorage token koi bhi bana sakta tha. Ab aisa nahi.
+// Koi bhi email / mobile number / user ID + password chalega — koi third-party
+// account (Disha/Firebase) hona zaroori nahi.
 // ============================================================================
 
 export const STUDENT_SESSION_KEY = "shd_student_session_v1";
@@ -34,6 +35,8 @@ export interface StudentLoginResult {
   ok: boolean;
   error?: string;
   student?: StudentProfile;
+  /** true = pehli baar account bana (auto register) */
+  isNewAccount?: boolean;
 }
 
 function apiBaseClean(apiBase?: string): string {
@@ -103,6 +106,7 @@ export async function loginStudentRequest(
       ok?: boolean;
       error?: string;
       student?: StudentProfile;
+      isNewAccount?: boolean;
     };
 
     if (!res.ok || !data?.ok) {
@@ -119,7 +123,11 @@ export async function loginStudentRequest(
     }
 
     purgeLegacyStudentSession();
-    return { ok: true, student: session.student || data.student };
+    return {
+      ok: true,
+      student: session.student || data.student,
+      isNewAccount: Boolean(data.isNewAccount),
+    };
   } catch {
     return { ok: false, error: "Network error. Please check your connection." };
   }

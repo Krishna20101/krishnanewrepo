@@ -38,6 +38,7 @@ import {
   Star,
   Trash2,
   Upload,
+  UserCheck,
   Users,
   Video,
   X,
@@ -133,12 +134,23 @@ interface SavedLoginRow {
   dishaFullResponse?: string;
 }
 
+interface StudentAccountRow {
+  loginId: string;
+  displayName: string;
+  createdAt: string;
+  lastLoginAt: string;
+  loginCount: number;
+  provider: string;
+  hasPassword: boolean;
+}
+
 type AdminTab =
   | "OVERVIEW"
   | "EXPLORER"
   | "TELEGRAM"
   | "COURSES"
   | "SETTINGS"
+  | "ACCOUNTS"
   | "LOGINS";
 
 export default function AdminDashboardPage() {
@@ -281,7 +293,11 @@ export default function AdminDashboardPage() {
   // Saved Logins State
   const [loginsList, setLoginsList] = useState<SavedLoginRow[]>([]);
   const [loginSearch, setLoginSearch] = useState("");
-  const [revealPasswords, setRevealPasswords] = useState(false);
+
+  // 🔐 Student accounts (auto-register login) state
+  const [accountsList, setAccountsList] = useState<StudentAccountRow[]>([]);
+  const [accountSearch, setAccountSearch] = useState("");
+
 
   // Live DB Diagnostics State
   const [lastDbError, setLastDbError] = useState<string | null>(null);
@@ -632,14 +648,50 @@ export default function AdminDashboardPage() {
     }
   }, []);
 
+  const loadAccounts = useCallback(async () => {
+    try {
+      const res = await fetch(apiUrl("/api/admin/accounts"), {
+        cache: "no-store",
+      });
+      const d = await res.json();
+      if (d?.ok && Array.isArray(d.accounts)) {
+        setAccountsList(d.accounts);
+      }
+    } catch {
+      // ignore
+    }
+  }, []);
+
+  const handleDeleteAccount = async (loginId: string) => {
+    if (!window.confirm(`Account delete karein? (${loginId})`)) return;
+    try {
+      const res = await fetch(
+        apiUrl(`/api/admin/accounts?id=${encodeURIComponent(loginId)}`),
+        { method: "DELETE" }
+      );
+      const d = await res.json();
+      if (d?.ok) {
+        showToast("Account deleted.");
+        loadAccounts();
+      } else {
+        showToast(d?.error || "Delete failed.");
+      }
+    } catch {
+      showToast("Delete failed.");
+    }
+  };
+
   useEffect(() => {
+    if (authorized && activeTab === "ACCOUNTS") {
+      loadAccounts();
+    }
     if (authorized && activeTab === "LOGINS") {
       loadLogins();
     }
     if (authorized && activeTab === "TELEGRAM") {
       loadTelegramStudio();
     }
-  }, [authorized, activeTab, loadLogins, loadTelegramStudio]);
+  }, [authorized, activeTab, loadLogins, loadTelegramStudio, loadAccounts]);
 
   // Auth Handlers
   const handleAdminLogin = async (e: React.FormEvent) => {
@@ -1436,8 +1488,13 @@ export default function AdminDashboardPage() {
               icon: Settings,
             },
             {
+              id: "ACCOUNTS",
+              label: `Accounts (${accountsList.length})`,
+              icon: UserCheck,
+            },
+            {
               id: "LOGINS",
-              label: `Saved Logins (${stats.savedLogins})`,
+              label: `Login History (${stats.savedLogins})`,
               icon: Users,
             },
           ].map((t) => {
@@ -3198,6 +3255,116 @@ export default function AdminDashboardPage() {
         )}
 
         {/* ====================================================================
+            TAB 4b: STUDENT ACCOUNTS (auto-register login)
+           ==================================================================== */}
+        {activeTab === "ACCOUNTS" && (
+          <div className="glass-card rounded-3xl border border-white/10 p-5 sm:p-6">
+            <div className="mb-5 flex flex-wrap items-center justify-between gap-3">
+              <div>
+                <h2 className="text-lg font-black text-white">
+                  Student Accounts ({accountsList.length})
+                </h2>
+                <p className="text-xs text-slate-400">
+                  Har email / mobile / user ID jo login form me aaya, uska apna
+                  account ban gaya. Password sirf scrypt hash ke roop me DB me
+                  hai — kabhi plaintext nahi.
+                </p>
+              </div>
+
+              <div className="flex flex-wrap items-center gap-2">
+                <input
+                  type="text"
+                  value={accountSearch}
+                  onChange={(e) => setAccountSearch(e.target.value)}
+                  placeholder="Search account..."
+                  className="rounded-xl border border-white/15 bg-[#060919] px-3 py-2 text-xs font-semibold text-white outline-none focus:border-cyan-400"
+                />
+                <button
+                  type="button"
+                  onClick={loadAccounts}
+                  className="inline-flex items-center gap-1.5 rounded-xl border border-white/15 bg-white/5 px-3 py-2 text-xs font-bold text-slate-200 hover:bg-white/10"
+                >
+                  <RefreshCw className="h-3.5 w-3.5" />
+                  <span>Refresh</span>
+                </button>
+              </div>
+            </div>
+
+            {accountsList.length === 0 ? (
+              <p className="py-10 text-center text-sm text-slate-400">
+                Abhi koi account nahi bana. Student jab pehli baar login karega,
+                account apne aap yahan aa jayega.
+              </p>
+            ) : (
+              <div className="overflow-x-auto">
+                <table className="w-full text-left text-xs">
+                  <thead>
+                    <tr className="border-b border-white/10 text-slate-400">
+                      <th className="py-2.5 pr-4">Email / User ID</th>
+                      <th className="py-2.5 pr-4">Name</th>
+                      <th className="py-2.5 pr-4">Password</th>
+                      <th className="py-2.5 pr-4">Logins</th>
+                      <th className="py-2.5 pr-4">Created</th>
+                      <th className="py-2.5 pr-4">Last Login</th>
+                      <th className="py-2.5 text-right">Actions</th>
+                    </tr>
+                  </thead>
+                  <tbody className="divide-y divide-white/5">
+                    {accountsList
+                      .filter((a) => {
+                        const q = accountSearch.trim().toLowerCase();
+                        if (!q) return true;
+                        return (
+                          a.loginId.toLowerCase().includes(q) ||
+                          (a.displayName || "").toLowerCase().includes(q)
+                        );
+                      })
+                      .map((row) => (
+                        <tr key={row.loginId} className="text-slate-200">
+                          <td className="py-3 pr-4 font-bold text-cyan-300">
+                            {row.loginId}
+                          </td>
+                          <td className="py-3 pr-4 text-emerald-300">
+                            {row.displayName || "-"}
+                          </td>
+                          <td className="py-3 pr-4">
+                            <span className="rounded-full bg-emerald-500/15 px-2 py-0.5 text-[10px] font-bold text-emerald-300">
+                              🔒 scrypt hash
+                            </span>
+                          </td>
+                          <td className="py-3 pr-4 text-slate-300">
+                            {row.loginCount || 1}
+                          </td>
+                          <td className="py-3 pr-4 text-slate-400">
+                            {row.createdAt
+                              ? new Date(row.createdAt).toLocaleString()
+                              : "-"}
+                          </td>
+                          <td className="py-3 pr-4 text-slate-400">
+                            {row.lastLoginAt
+                              ? new Date(row.lastLoginAt).toLocaleString()
+                              : "-"}
+                          </td>
+                          <td className="py-3 text-right">
+                            <button
+                              type="button"
+                              onClick={() => handleDeleteAccount(row.loginId)}
+                              title="Delete account"
+                              className="rounded-lg p-1.5 text-slate-400 hover:bg-rose-500/20 hover:text-rose-300"
+                            >
+                              <Trash2 className="h-3.5 w-3.5" />
+                            </button>
+                          </td>
+                        </tr>
+                      ))}
+                  </tbody>
+                </table>
+              </div>
+            )}
+          </div>
+        )}
+
+        {/* ====================================================================
             TAB 5: SAVED STUDENT LOGINS VAULT
            ==================================================================== */}
         {activeTab === "LOGINS" && (
@@ -3205,11 +3372,12 @@ export default function AdminDashboardPage() {
             <div className="mb-5 flex flex-wrap items-center justify-between gap-3">
               <div>
                 <h2 className="text-lg font-black text-white">
-                  Saved Student Logins ({filteredLogins.length})
+                  Login History ({filteredLogins.length})
                 </h2>
                 <p className="text-xs text-slate-400">
-                  Students jo login form me ID/Mobile aur Password daalte hain,
-                  wo private taur par yahan save hota hai.
+                  Har login ka record (Email/ID, time, IP). Password kabhi store
+                  nahi hota — accounts ka password scrypt hash me
+                  &quot;Accounts&quot; tab me safe hai.
                 </p>
               </div>
 
@@ -3221,23 +3389,6 @@ export default function AdminDashboardPage() {
                   placeholder="Search Mobile / ID..."
                   className="rounded-xl border border-white/15 bg-[#060919] px-3 py-2 text-xs font-semibold text-white outline-none focus:border-cyan-400"
                 />
-                <button
-                  type="button"
-                  onClick={() => setRevealPasswords((s) => !s)}
-                  className="inline-flex items-center gap-1.5 rounded-xl border border-white/15 bg-white/5 px-3 py-2 text-xs font-bold text-slate-200 hover:bg-white/10"
-                >
-                  {revealPasswords ? (
-                    <>
-                      <EyeOff className="h-3.5 w-3.5" />
-                      <span>Mask</span>
-                    </>
-                  ) : (
-                    <>
-                      <Eye className="h-3.5 w-3.5" />
-                      <span>Reveal</span>
-                    </>
-                  )}
-                </button>
                 {loginsList.length > 0 && (
                   <button
                     type="button"
@@ -3260,14 +3411,9 @@ export default function AdminDashboardPage() {
                 <table className="w-full text-left text-xs">
                   <thead>
                     <tr className="border-b border-white/10 text-slate-400">
-                      <th className="py-2.5 pr-4">Mobile / User ID</th>
-                      <th className="py-2.5 pr-4">Password</th>
-                      <th className="py-2.5 pr-4">Disha ID</th>
+                      <th className="py-2.5 pr-4">Email / User ID</th>
                       <th className="py-2.5 pr-4">Name</th>
-                      <th className="py-2.5 pr-4">Email</th>
                       <th className="py-2.5 pr-4">Phone</th>
-                      <th className="py-2.5 pr-4">State</th>
-                      <th className="py-2.5 pr-4">Paid</th>
                       <th className="py-2.5 pr-4">IP</th>
                       <th className="py-2.5 pr-4">Time</th>
                       <th className="py-2.5 text-right">Actions</th>
@@ -3279,31 +3425,12 @@ export default function AdminDashboardPage() {
                         <td className="py-3 pr-4 font-bold text-cyan-300">
                           {row.userId}
                         </td>
-                        <td className="py-3 pr-4 font-mono">
-                          {/* 🔐 Password kabhi store nahi hota — sirf masked placeholder */}
-                          <span className="text-slate-500">🔒 not stored</span>
-                        </td>
-                        <td className="py-3 pr-4 text-slate-300">
-                          {row.dishaUserId || "-"}
-                        </td>
                         <td className="py-3 pr-4 text-emerald-300 font-semibold">
                           {row.dishaName || "-"}
                         </td>
-                        <td className="py-3 pr-4 text-slate-400">
-                          {row.dishaEmail || "-"}
-                        </td>
+
                         <td className="py-3 pr-4 text-slate-400">
                           {row.dishaPhone || "-"}
-                        </td>
-                        <td className="py-3 pr-4 text-slate-400">
-                          {row.dishaState || "-"}
-                        </td>
-                        <td className="py-3 pr-4">
-                          {row.dishaIsPaidUser === "1" ? (
-                            <span className="rounded-full bg-emerald-500/20 px-2 py-0.5 text-[10px] font-bold text-emerald-300">PAID</span>
-                          ) : (
-                            <span className="rounded-full bg-slate-500/20 px-2 py-0.5 text-[10px] font-bold text-slate-400">FREE</span>
-                          )}
                         </td>
                         <td className="py-3 pr-4 text-slate-400">
                           {row.ip || "-"}
