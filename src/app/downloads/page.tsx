@@ -15,7 +15,6 @@ import {
 } from "lucide-react";
 import { useApp } from "@/context/AppContext";
 import GlowingBackButton from "@/components/GlowingBackButton";
-import BottomDock from "@/components/BottomDock";
 import SafeImage from "@/components/SafeImage";
 import LoginGateCard from "@/components/LoginGateCard";
 import PleaseWaitScreen from "@/components/PleaseWaitScreen";
@@ -149,55 +148,67 @@ export default function DownloadsPage() {
   };
 
   return (
-    <div className="mx-auto min-h-screen max-w-5xl pb-28">
-      <header className="sticky top-0 z-30 border-b border-white/10 bg-[#07091b]/95 px-4 py-3.5 backdrop-blur-md">
-        <div className="flex items-center gap-4">
+    <div className="mx-auto min-h-screen w-full max-w-4xl pb-16">
+      <header className="sticky top-0 z-30 border-b border-white/[0.07] bg-[#08090f]/92 px-4 py-3 backdrop-blur-sm sm:px-6">
+        <div className="flex items-center gap-3">
           <GlowingBackButton fallbackHref="/" />
-          <div>
-            <h1 className="text-xl font-black uppercase tracking-wider text-white">
-              DOWNLOADS ({downloadsList.length})
-            </h1>
-            <p className="text-xs font-medium text-slate-400">
-              Aapke downloaded Lectures aur PDF Notes yahan rehte hain.
+          <div className="min-w-0">
+            <p className="text-[10px] font-bold uppercase tracking-[0.18em] text-ember-400">
+              Saved on this device
             </p>
+            <h1 className="truncate font-display text-[16px] font-semibold leading-tight text-sand-100">
+              Downloads ({downloadsList.length})
+            </h1>
           </div>
         </div>
       </header>
 
-      <main className="px-4 pt-5">
-        {/* VIDEO | PDF Toggle Pill Bar */}
-        <div className="glass-card mx-auto mb-6 grid max-w-xl grid-cols-2 gap-2 rounded-2xl border border-white/10 p-2">
-          <button
-            type="button"
-            onClick={() => setActiveTab("VIDEO")}
-            className={`flex items-center justify-center gap-2 rounded-xl py-3 text-xs font-black uppercase tracking-widest transition-all ${
-              activeTab === "VIDEO"
-                ? "border border-indigo-400/60 bg-gradient-to-r from-indigo-600 to-purple-600 text-white"
-                : "text-slate-300 hover:bg-white/5"
-            }`}
-          >
-            <PlayCircle className="h-4 w-4" />
-            <span>VIDEO ({videoDownloads.length})</span>
-          </button>
-
-          <button
-            type="button"
-            onClick={() => setActiveTab("PDF")}
-            className={`flex items-center justify-center gap-2 rounded-xl py-3 text-xs font-black uppercase tracking-widest transition-all ${
-              activeTab === "PDF"
-                ? "border border-rose-400/60 bg-gradient-to-r from-rose-600 to-pink-600 text-white"
-                : "text-slate-300 hover:bg-white/5"
-            }`}
-          >
-            <FileText className="h-4 w-4" />
-            <span>PDF ({pdfDownloads.length})</span>
-          </button>
+      <main className="px-4 pt-5 sm:px-6">
+        {/* Segmented switch — same language as course screen */}
+        <div className="relative mb-5 flex items-center gap-1 border-b border-white/[0.08]">
+          {(
+            [
+              { key: "VIDEO" as const, label: "Lectures", count: videoDownloads.length },
+              { key: "PDF" as const, label: "Notes", count: pdfDownloads.length },
+            ] as const
+          ).map((t) => {
+            const active = activeTab === t.key;
+            return (
+              <button
+                key={t.key}
+                type="button"
+                onClick={() => setActiveTab(t.key)}
+                className={`relative -mb-px inline-flex items-center gap-1.5 px-4 py-2.5 text-[12px] font-bold uppercase tracking-[0.12em] transition-colors ${
+                  active ? "text-ember-300" : "text-sand-500 hover:text-sand-200"
+                }`}
+              >
+                {t.key === "VIDEO" ? (
+                  <PlayCircle className="h-3.5 w-3.5" />
+                ) : (
+                  <FileText className="h-3.5 w-3.5" />
+                )}
+                <span>{t.label}</span>
+                <span
+                  className={`rounded px-1.5 py-px text-[10px] font-extrabold ${
+                    active
+                      ? "bg-ember-500/20 text-ember-300"
+                      : "bg-white/[0.06] text-sand-500"
+                  }`}
+                >
+                  {t.count}
+                </span>
+                {active && (
+                  <span className="absolute inset-x-0 -bottom-px h-[2px] rounded-full bg-ember-500" />
+                )}
+              </button>
+            );
+          })}
         </div>
 
         {/* In-App Vault storage meter */}
-        <div className="glass-card mx-auto mb-5 max-w-xl rounded-2xl border border-white/10 p-3.5">
-          <div className="flex items-center justify-between text-[11px] font-bold text-slate-300">
-            <span className="inline-flex items-center gap-1.5 text-emerald-300">
+        <div className="surface mx-auto mb-5 max-w-xl rounded-xl p-3.5">
+          <div className="flex items-center justify-between text-[11px] font-semibold text-sand-300">
+            <span className="inline-flex items-center gap-1.5 text-sage-300">
               <HardDriveDownload className="h-3.5 w-3.5" />
               In-App Offline Vault
             </span>
@@ -430,7 +441,6 @@ export default function DownloadsPage() {
         </div>
       )}
 
-      <BottomDock />
     </div>
   );
 }
