@@ -3,6 +3,7 @@
 import React, { useCallback, useEffect, useRef, useState } from "react";
 import { useParams, useRouter } from "next/navigation";
 import {
+  ArrowUpRight,
   Check,
   Clock,
   Download,
@@ -13,8 +14,10 @@ import {
   Maximize2,
   Minimize2,
   Play,
+  Radio,
   Rewind,
   RotateCw,
+  Send,
   Share2,
   Sparkles,
 } from "lucide-react";
@@ -51,6 +54,9 @@ interface WatchApiResponse {
   isYoutubeOnly?: boolean;
   fileSize?: number;
   allowVideoDownload?: boolean;
+  telegramBotUrl?: string;
+  telegramBotUsername?: string;
+  telegramChannelUrl?: string;
   siblings: SiblingVideo[];
 }
 
@@ -326,20 +332,20 @@ export default function WatchLecturePage() {
 
   return (
     <div
-      className="mx-auto min-h-screen max-w-5xl bg-[#04050e] pb-16 select-none"
+      className="mx-auto min-h-screen max-w-5xl pb-16 select-none"
       onContextMenu={(e) => e.preventDefault()}
     >
       {/* Top Player Header */}
-      <header className="sticky top-0 z-30 border-b border-white/10 bg-[#050716]/95 px-4 py-3 backdrop-blur-md">
+      <header className="sticky top-0 z-30 border-b border-white/[0.07] bg-[#08090f]/92 px-4 py-3 backdrop-blur-sm">
         <div className="flex items-center justify-between gap-3">
           <div className="flex min-w-0 items-center gap-3">
             <GlowingBackButton onClick={handleBackToChapter} />
             <div className="min-w-0">
-              <h1 className="truncate text-sm sm:text-base font-extrabold text-white">
+              <h1 className="truncate font-display text-[15px] font-semibold text-sand-100">
                 {data?.video?.title || "Please wait, loading lecture..."}
               </h1>
-              <p className="truncate text-[11px] font-semibold text-cyan-300/90">
-                {config.appName} • {data?.folderTitle || "Class Video"}
+              <p className="truncate text-[10.5px] font-medium text-sand-500">
+                {config.appName} · {data?.folderTitle || "Lecture"}
               </p>
             </div>
           </div>
@@ -348,52 +354,91 @@ export default function WatchLecturePage() {
             type="button"
             onClick={handleToggleLandscape}
             title="Turn / Rotate Screen"
-            className="inline-flex shrink-0 items-center gap-1.5 rounded-xl border border-purple-400/50 bg-purple-500/15 px-3 py-2 text-xs font-extrabold text-purple-200 transition hover:bg-purple-500/25 active:scale-95"
+            className="btn-ghost shrink-0 px-3 py-2 text-[11px] uppercase tracking-[0.1em]"
           >
-            <RotateCw className="h-4 w-4 text-cyan-300" />
+            <RotateCw className="h-4 w-4 text-ember-400" />
             <span>Turn</span>
           </button>
         </div>
       </header>
 
-      {/* Main Theater Player Container */}
+      {/* ══════════════ MAIN STAGE ══════════════ */}
       <div className="mx-auto max-w-4xl sm:px-4 sm:pt-5">
-        <div
-          ref={playerShellRef}
-          className={
-            applyCssForceRotate
-              ? "forced-landscape-player"
-              : "relative overflow-hidden bg-black sm:rounded-3xl sm:border sm:border-cyan-400/25"
-          }
-        >
-          {isRotatedLandscape && (
-            <div className="absolute right-4 top-4 z-50 flex items-center gap-2">
-              <button
-                type="button"
-                onClick={handleToggleLandscape}
-                className="flex items-center gap-1.5 rounded-full border border-cyan-400/60 bg-black/85 px-3.5 py-2 text-xs font-black uppercase tracking-wider text-cyan-200"
-              >
-                <Minimize2 className="h-4 w-4" />
-                <span>Exit Rotate</span>
-              </button>
-            </div>
-          )}
-
-          <div
-            className={
-              applyCssForceRotate
-                ? "relative h-full w-full"
-                : "relative aspect-video w-full bg-[#050714]"
-            }
-          >
+        <div className="relative overflow-hidden rounded-card border border-white/[0.08] bg-ink-950 sm:border">
+          <div className="relative aspect-video w-full bg-ink-900">
             {loading ? (
               <div className="flex h-full w-full flex-col items-center justify-center gap-3">
-                <Loader2 className="h-10 w-10 animate-spin text-cyan-300" />
-                <p className="text-xs font-black uppercase tracking-widest text-cyan-300">
-                  Please wait, loading video stream...
+                <Loader2 className="h-8 w-8 animate-spin text-ember-400" />
+                <p className="text-[11px] font-bold uppercase tracking-[0.18em] text-sand-400">
+                  Loading lecture
                 </p>
               </div>
-            ) : playerSource === "TELEGRAM" && data?.telegramStreamUrl ? (
+            ) : data?.embedUrl ? (
+              /* YouTube-embedded lecture (no Telegram file) */
+              <iframe
+                src={data.embedUrl}
+                title={data.video?.title || "Lecture"}
+                className="h-full w-full border-0"
+                allow="accelerometer; autoplay; clipboard-write; encrypted-media; gyroscope; picture-in-picture; fullscreen"
+                allowFullScreen
+              />
+            ) : data?.telegramBotUrl ? (
+              /* ═══ TELEGRAM GATEWAY STAGE ═══ */
+              <div className="relative flex h-full w-full flex-col items-center justify-center overflow-hidden px-6 text-center">
+                <SafeImage
+                  src={data.video?.thumbnail}
+                  fallbackSrc={config.defaultImageUrl}
+                  alt={data.video?.title || "Lecture"}
+                  className="absolute inset-0 h-full w-full object-cover opacity-[0.16]"
+                />
+                <div className="absolute inset-0 bg-gradient-to-t from-ink-950 via-ink-950/85 to-ink-950/60" />
+
+                <div className="relative z-10 w-full max-w-sm">
+                  <span className="inline-flex items-center gap-1.5 rounded-tag border border-ember-500/35 bg-ember-500/10 px-2.5 py-1 text-[10px] font-extrabold uppercase tracking-[0.16em] text-ember-300">
+                    <Send className="h-3 w-3" />
+                    Telegram delivery
+                  </span>
+
+                  <h2 className="mt-3 font-display text-[19px] font-semibold leading-snug text-sand-100 sm:text-[22px]">
+                    Open in Telegram to watch
+                  </h2>
+                  <p className="mx-auto mt-1.5 max-w-xs text-[12px] leading-relaxed text-sand-400">
+                    The lecture is delivered privately by our bot. It expires
+                    automatically after 3 hours.
+                  </p>
+
+                  <a
+                    href={data.telegramBotUrl}
+                    target="_blank"
+                    rel="noopener noreferrer"
+                    className="btn-ember mt-4 w-full py-3.5 text-[12px] uppercase tracking-[0.14em]"
+                  >
+                    <Send className="h-4 w-4" />
+                    <span>Open in Telegram</span>
+                    <ArrowUpRight className="h-4 w-4" />
+                  </a>
+
+                  {data.telegramChannelUrl && (
+                    <a
+                      href={data.telegramChannelUrl}
+                      target="_blank"
+                      rel="noopener noreferrer"
+                      className="btn-ghost mt-2 w-full py-2.5 text-[11px] uppercase tracking-[0.12em]"
+                    >
+                      <Radio className="h-3.5 w-3.5" />
+                      <span>Join our channel</span>
+                    </a>
+                  )}
+
+                  <p className="mt-3 text-[10.5px] leading-relaxed text-sand-500">
+                    Link valid for 20 minutes. In Telegram, press{" "}
+                    <span className="font-semibold text-sand-300">Start</span> and
+                    the video will be sent to you.
+                  </p>
+                </div>
+              </div>
+            ) : data?.telegramStreamUrl ? (
+              /* Legacy in-site stream (fallback if bot not configured) */
               <>
                 <SmartVideoPlayer
                   primarySrc={data.telegramStreamUrl}
@@ -406,7 +451,7 @@ export default function WatchLecturePage() {
                   onModeChange={(m, info) =>
                     setStreamModeInfo(
                       m === "offline"
-                        ? "OFFLINE — phone se chal raha hai (0% internet)"
+                        ? "OFFLINE"
                         : info
                         ? `${m.toUpperCase()} — ${info}`
                         : m.toUpperCase()
@@ -418,112 +463,43 @@ export default function WatchLecturePage() {
                   }}
                   className="aspect-video w-full"
                 />
-
                 {streamModeInfo && (
-                  <div className="pointer-events-none absolute bottom-2 right-2 z-20 rounded-full bg-black/70 px-2.5 py-1 text-[9px] font-bold uppercase tracking-wide text-emerald-300">
+                  <div className="pointer-events-none absolute bottom-2 right-2 z-20 rounded bg-ink-950/80 px-2 py-1 text-[9px] font-bold uppercase tracking-wide text-sage-300">
                     {streamModeInfo}
                   </div>
                 )}
               </>
-            ) : data?.embedUrl ? (
-              <iframe
-                src={data.embedUrl}
-                title={data.video?.title || "Lecture Video"}
-                className="h-full w-full border-0"
-                allow="accelerometer; autoplay; clipboard-write; encrypted-media; gyroscope; picture-in-picture; fullscreen"
-                allowFullScreen
-              />
             ) : (
-              <div className="relative flex h-full w-full flex-col items-center justify-center overflow-hidden p-6 text-center">
-                <SafeImage
-                  src={data?.video?.thumbnail}
-                  fallbackSrc={config.defaultImageUrl}
-                  alt={data?.video?.title || "Lecture"}
-                  className="absolute inset-0 h-full w-full object-cover opacity-20"
-                />
-                <div className="relative z-10 max-w-md rounded-3xl border border-cyan-400/30 bg-[#090d24]/95 p-6">
-                  <Sparkles className="mx-auto mb-2.5 h-8 w-8 text-cyan-300" />
-                  <h2 className="text-lg font-black text-white">
-                    Video Stream Link Pending
-                  </h2>
-                  <p className="mt-1.5 text-xs leading-relaxed text-slate-300">
-                    Is lecture ka Telegram ya YouTube stream link Admin Panel se
-                    jald hi update kiya jayega. Stay tuned!
-                  </p>
-                </div>
+              <div className="flex h-full w-full flex-col items-center justify-center gap-2 px-6 text-center">
+                <Sparkles className="h-6 w-6 text-ember-400" />
+                <p className="font-display text-[16px] font-semibold text-sand-100">
+                  Stream not linked yet
+                </p>
+                <p className="max-w-xs text-[12px] leading-relaxed text-sand-400">
+                  This lecture has no stream yet. Please check back soon.
+                </p>
               </div>
             )}
           </div>
         </div>
 
-        {/* Custom Speed & Skip Bar when playing Protected Telegram Stream */}
-        {playerSource === "TELEGRAM" && data?.telegramStreamUrl && (
-          <div className="px-4 pt-3 sm:px-0">
-            <div className="flex flex-wrap items-center justify-between gap-2 rounded-2xl border border-cyan-400/20 bg-[#090d26] px-3.5 py-2.5">
-              <div className="flex items-center gap-2">
-                <button
-                  type="button"
-                  onClick={() => handleSeekOffset(-10)}
-                  className="inline-flex items-center gap-1 rounded-xl border border-white/15 bg-white/5 px-3 py-1.5 text-xs font-extrabold text-slate-200 active:scale-95"
-                >
-                  <Rewind className="h-3.5 w-3.5 text-cyan-300" />
-                  <span>-10s</span>
-                </button>
-                <button
-                  type="button"
-                  onClick={() => handleSeekOffset(10)}
-                  className="inline-flex items-center gap-1 rounded-xl border border-white/15 bg-white/5 px-3 py-1.5 text-xs font-extrabold text-slate-200 active:scale-95"
-                >
-                  <span>+10s</span>
-                  <FastForward className="h-3.5 w-3.5 text-cyan-300" />
-                </button>
-              </div>
-
-              <div className="flex items-center gap-2">
-                <button
-                  type="button"
-                  onClick={handleSpeedCycle}
-                  className="inline-flex items-center gap-1.5 rounded-xl border border-purple-400/40 bg-purple-500/15 px-3 py-1.5 text-xs font-black text-purple-200"
-                >
-                  <Gauge className="h-3.5 w-3.5 text-cyan-300" />
-                  <span>Speed: {playbackRate}x</span>
-                </button>
-
-                {hasBothSources && (
-                  <button
-                    type="button"
-                    onClick={() =>
-                      setPlayerSource((s) =>
-                        s === "TELEGRAM" ? "YOUTUBE" : "TELEGRAM"
-                      )
-                    }
-                    className="rounded-xl border border-amber-400/40 bg-amber-500/15 px-3 py-1.5 text-xs font-black text-amber-200"
-                  >
-                    Switch Server
-                  </button>
-                )}
-              </div>
-            </div>
-          </div>
-        )}
-
         {/* Player Action Bar */}
         <div className="px-4 pt-4 sm:px-0">
-          <div className="glass-card flex flex-wrap items-center justify-between gap-3 rounded-3xl border border-white/10 p-4">
+          <div className="surface flex flex-wrap items-center justify-between gap-3 rounded-card p-4">
             <div className="flex flex-wrap items-center gap-2.5">
               <button
                 type="button"
                 onClick={handleShare}
-                className="inline-flex items-center gap-1.5 rounded-2xl border border-white/15 bg-white/5 px-3.5 py-2.5 text-xs font-bold text-slate-200"
+                className="btn-ghost px-3.5 py-2.5 text-[11px] uppercase tracking-[0.1em]"
               >
                 {copied ? (
                   <>
-                    <Check className="h-4 w-4 text-emerald-400" />
+                    <Check className="h-4 w-4 text-sage-400" />
                     <span>Copied</span>
                   </>
                 ) : (
                   <>
-                    <Share2 className="h-4 w-4 text-cyan-300" />
+                    <Share2 className="h-4 w-4 text-sand-300" />
                     <span>Share</span>
                   </>
                 )}
@@ -532,9 +508,9 @@ export default function WatchLecturePage() {
               <button
                 type="button"
                 onClick={handleOpenNotesPdf}
-                className="inline-flex items-center gap-1.5 rounded-2xl border border-rose-400/40 bg-rose-500/15 px-3.5 py-2.5 text-xs font-extrabold text-rose-200"
+                className="btn-ghost px-3.5 py-2.5 text-[11px] uppercase tracking-[0.1em]"
               >
-                <FileText className="h-4 w-4 text-rose-400" />
+                <FileText className="h-4 w-4 text-sage-400" />
                 <span>
                   {data?.video?.hasRealPdf ? "Open Notes PDF" : "Notes PDF"}
                 </span>
@@ -547,26 +523,26 @@ export default function WatchLecturePage() {
                     type="button"
                     disabled={currentDownload?.status === "downloading"}
                     onClick={handleStartVideoDownload}
-                    className="inline-flex items-center gap-1.5 rounded-2xl border border-emerald-400/45 bg-emerald-500/15 px-3.5 py-2.5 text-xs font-extrabold text-emerald-200 transition hover:bg-emerald-500/25 disabled:opacity-75"
+                    className="btn-ghost px-3.5 py-2.5 text-[11px] uppercase tracking-[0.1em] disabled:opacity-75"
                   >
                     {currentDownload?.status === "downloading" ? (
                       <>
-                        <Loader2 className="h-4 w-4 animate-spin text-emerald-300" />
+                        <Loader2 className="h-4 w-4 animate-spin text-ember-400" />
                         <span>Saving {currentDownload.progressPct}%...</span>
                       </>
                     ) : currentDownload?.status === "paused" ? (
                       <>
-                        <Download className="h-4 w-4 text-amber-300" />
+                        <Download className="h-4 w-4 text-ember-400" />
                         <span>Resume Save ({currentDownload.progressPct}%)</span>
                       </>
                     ) : currentDownload?.status === "completed" ? (
                       <>
-                        <Check className="h-4 w-4 text-emerald-400" />
+                        <Check className="h-4 w-4 text-sage-400" />
                         <span>Saved Offline in App</span>
                       </>
                     ) : (
                       <>
-                        <Download className="h-4 w-4 text-emerald-300" />
+                        <Download className="h-4 w-4 text-sage-400" />
                         <span>
                           Save Offline
                           {data.fileSize
@@ -581,14 +557,14 @@ export default function WatchLecturePage() {
                     <button
                       type="button"
                       onClick={() => pauseMediaDownload(currentDownload.id)}
-                      className="rounded-2xl border border-amber-400/40 bg-amber-500/15 px-3 py-2.5 text-xs font-extrabold text-amber-200"
+                      className="btn-ghost px-3 py-2.5 text-[11px]"
                     >
                       Pause
                     </button>
                   )}
 
                   {offlineUrl && (
-                    <span className="inline-flex items-center gap-1 rounded-2xl border border-emerald-400/40 bg-emerald-500/10 px-3 py-2.5 text-[10px] font-black uppercase tracking-wide text-emerald-300">
+                    <span className="chip chip-sage">
                       ● Playing Offline
                     </span>
                   )}
@@ -600,9 +576,9 @@ export default function WatchLecturePage() {
               <button
                 type="button"
                 onClick={handleToggleLandscape}
-                className="inline-flex items-center gap-2 rounded-2xl border border-cyan-400/50 bg-gradient-to-r from-cyan-500/20 to-purple-600/25 px-4 py-2.5 text-xs font-black uppercase tracking-wider text-cyan-200 active:scale-95"
+                className="btn-ghost px-4 py-2.5 text-[11px] uppercase tracking-[0.12em] active:scale-95"
               >
-                <Maximize2 className="h-4 w-4 text-cyan-300" />
+                <Maximize2 className="h-4 w-4 text-ember-400" />
                 <span>Turn Screen</span>
               </button>
             </div>
@@ -610,8 +586,8 @@ export default function WatchLecturePage() {
 
           {/* Live Download Progress Strip if downloading */}
           {currentDownload?.status === "downloading" && (
-            <div className="mt-3 rounded-2xl border border-emerald-400/35 bg-emerald-500/10 p-3">
-              <div className="flex items-center justify-between text-xs font-bold text-emerald-200">
+            <div className="mt-3 rounded-xl border border-white/[0.08] bg-ink-900/70 p-3">
+              <div className="flex items-center justify-between gap-2 text-[11px] font-semibold text-sand-300">
                 <span>
                   Please wait, lecture phone ke andar save ho raha hai (
                   {currentDownload.progressPct}%) — internet ke bina chalega...
@@ -623,7 +599,7 @@ export default function WatchLecturePage() {
               </div>
               <div className="mt-2 h-2 w-full overflow-hidden rounded-full bg-white/10">
                 <div
-                  className="h-full rounded-full bg-gradient-to-r from-cyan-400 to-emerald-400 transition-all"
+                  className="h-full rounded-full bg-gradient-to-r from-ember-500 to-ember-300 transition-all"
                   style={{ width: `${currentDownload.progressPct}%` }}
                 />
               </div>
@@ -632,18 +608,18 @@ export default function WatchLecturePage() {
 
           {/* Lecture Details Card */}
           {data?.video && (
-            <div className="mt-4 rounded-3xl border border-white/10 bg-white/[0.03] p-4">
-              <div className="flex flex-wrap items-center gap-2 text-[11px] font-bold text-cyan-300">
+            <div className="mt-4 rounded-card border border-white/[0.08] bg-ink-900/60 p-4">
+              <div className="flex flex-wrap items-center gap-2 text-[11px] font-semibold text-ember-400">
                 <span>{data.batch.name}</span>
                 <span>•</span>
-                <span className="text-purple-300">{data.folderTitle}</span>
+                <span className="text-sage-400">{data.folderTitle}</span>
               </div>
-              <h2 className="mt-1.5 text-lg sm:text-xl font-black text-white">
+              <h2 className="mt-1.5 font-display text-[19px] font-semibold text-sand-100">
                 {data.video.title}
               </h2>
               {data.video.uploadedAt && (
                 <p className="mt-1.5 inline-flex items-center gap-1.5 text-xs font-medium text-slate-400">
-                  <Clock className="h-3.5 w-3.5 text-cyan-400" />
+                  <Clock className="h-3.5 w-3.5 text-sand-500" />
                   <span>Uploaded: {data.video.uploadedAt}</span>
                 </p>
               )}
@@ -653,7 +629,7 @@ export default function WatchLecturePage() {
           {/* More Lectures in Same Chapter */}
           {data?.siblings && data.siblings.length > 1 && (
             <div className="mt-7">
-              <h3 className="mb-3.5 text-xs font-black uppercase tracking-widest text-slate-300">
+              <h3 className="mb-3.5 text-[11px] font-bold uppercase tracking-[0.18em] text-sand-400">
                 More Lectures in {data.folderTitle} ({data.siblings.length})
               </h3>
               <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
@@ -673,13 +649,13 @@ export default function WatchLecturePage() {
                           );
                         }
                       }}
-                      className={`glass-card perf-card-item flex items-center gap-3.5 rounded-2xl border p-3 text-left transition ${
+                      className={`surface perf-card-item flex items-center gap-3.5 rounded-xl border p-3 text-left transition ${
                         isCurrent
-                          ? "border-cyan-400/60 bg-cyan-500/10"
-                          : "border-white/10 hover:border-purple-400/40"
+                          ? "border-ember-500/45 bg-ember-500/[0.07]"
+                          : "border-white/[0.08] hover:border-white/20"
                       }`}
                     >
-                      <div className="relative h-14 w-24 shrink-0 overflow-hidden rounded-xl bg-[#0d122d]">
+                      <div className="relative h-14 w-24 shrink-0 overflow-hidden rounded-lg bg-ink-850">
                         <SafeImage
                           src={item.thumbnail}
                           fallbackSrc={config.defaultImageUrl}
@@ -690,18 +666,18 @@ export default function WatchLecturePage() {
                           <Play
                             className={`h-4 w-4 ${
                               isCurrent
-                                ? "fill-cyan-300 text-cyan-300"
-                                : "fill-white text-white"
+                                ? "fill-ember-400 text-ember-400"
+                                : "fill-sand-100 text-sand-100"
                             }`}
                           />
                         </div>
                       </div>
                       <div className="min-w-0 flex-1">
-                        <p className="line-clamp-2 text-xs font-extrabold text-white">
+                        <p className="line-clamp-2 text-[12.5px] font-semibold text-sand-100">
                           {item.title}
                         </p>
                         {isCurrent && (
-                          <span className="mt-1 inline-block text-[10px] font-black uppercase tracking-wider text-cyan-300">
+                          <span className="mt-1 inline-block text-[9.5px] font-extrabold uppercase tracking-[0.14em] text-ember-400">
                             ● Playing Now
                           </span>
                         )}

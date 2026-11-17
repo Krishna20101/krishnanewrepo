@@ -8,6 +8,12 @@ import {
 } from "@/lib/batchEngine";
 import { getEffectiveSiteSettings, getVideoEmbed } from "@/lib/db";
 import { buildYoutubeEmbedUrl } from "@/lib/youtube";
+import { verifyTelegramMediaToken } from "@/lib/tgCrypto";
+import {
+  createBotHandoffToken,
+  getBotChannelUrl,
+  getBotUsername,
+} from "@/lib/botHandoff";
 
 export const dynamic = "force-dynamic";
 
@@ -90,6 +96,26 @@ export async function GET(
         : directStreamUrl
       : "";
 
+    // ── 🤖 BOT HANDOFF ("Open in Telegram") ────────────────────────────────
+    // tg_video_token ke andar encrypted chat id + message id hota hai.
+    // Usse ek 20-min encrypted handoff token banate hain jo bot ko bhejta hai.
+    let telegramBotUrl = "";
+    let telegramBotUsername = "";
+    const mediaPayload = tgToken ? verifyTelegramMediaToken(tgToken) : null;
+    const botUser = getBotUsername();
+    if (mediaPayload && botUser) {
+      const handoff = createBotHandoffToken({
+        c: mediaPayload.c,
+        m: mediaPayload.m,
+        t: String(located.video.title || "").slice(0, 120),
+        b: String(rawBatch.name || "").slice(0, 120),
+        f: String(located.folderTitle || "").slice(0, 120),
+        iat: Math.floor(Date.now() / 1000),
+      });
+      telegramBotUsername = botUser;
+      telegramBotUrl = `https://t.me/${botUser}?start=${handoff}`;
+    }
+
     const cleanVideo = toCleanNodeItem(located.video, undefined, batchId);
 
     // Limit sibling list to max 30 nearby items so watch page stays lightning fast on mobile!
@@ -120,6 +146,10 @@ export async function GET(
       isYoutubeOnly: Boolean(!tgToken && embedUrl),
       fileSize: located.video.file_size || 0,
       allowVideoDownload: settings.allowVideoDownload !== false,
+      // 🤖 Telegram bot gateway
+      telegramBotUrl,
+      telegramBotUsername,
+      telegramChannelUrl: getBotChannelUrl(),
       siblings: nearbySiblings,
     });
   } catch {

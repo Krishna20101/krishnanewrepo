@@ -1,23 +1,19 @@
 "use client";
 
-import React, { Suspense, useEffect, useState } from "react";
+import React, { Suspense, useEffect, useMemo, useState } from "react";
 import { useParams, useRouter, useSearchParams } from "next/navigation";
 import {
-  Calendar,
+  ArrowLeft,
+  BookOpen,
+  ChevronRight,
   ExternalLink,
   FileText,
-  FolderOpen,
   Loader2,
   Play,
-  PlayCircle,
-  Radio,
-  Star,
-  Trophy,
+  Sparkles,
 } from "lucide-react";
 import { useApp } from "@/context/AppContext";
-import GlowingBackButton from "@/components/GlowingBackButton";
 import SafeImage from "@/components/SafeImage";
-import ComingSoonState from "@/components/ComingSoonState";
 import LoginGateCard from "@/components/LoginGateCard";
 import PleaseWaitScreen from "@/components/PleaseWaitScreen";
 import { apiUrl } from "@/config/siteConfig";
@@ -66,17 +62,14 @@ interface BatchLevelResponse {
   };
 }
 
+type MediaTab = "VIDEO" | "PDF";
+
 function BatchExplorerInner() {
   const params = useParams<{ batchId: string }>();
   const searchParams = useSearchParams();
   const router = useRouter();
-  const {
-    isHydrated,
-    isLoggedIn,
-    openPdfComingSoon,
-    config,
-    navigateWithWait,
-  } = useApp();
+  const { isHydrated, isLoggedIn, openPdfComingSoon, config, navigateWithWait } =
+    useApp();
 
   const batchId = decodeURIComponent(String(params.batchId || ""));
   const folderId = searchParams.get("folderId");
@@ -85,12 +78,8 @@ function BatchExplorerInner() {
   const [loading, setLoading] = useState(true);
   const [loadingMore, setLoadingMore] = useState(false);
   const [page, setPage] = useState(1);
-  const [rootTab, setRootTab] = useState<"SUBJECTS" | "TEST" | "LIVE">(
-    "SUBJECTS"
-  );
-  const [mediaTab, setMediaTab] = useState<"VIDEO" | "PDF">("VIDEO");
+  const [mediaTab, setMediaTab] = useState<MediaTab>("VIDEO");
 
-  // Reset pagination whenever batchId or folderId changes
   useEffect(() => {
     setPage(1);
   }, [batchId, folderId]);
@@ -98,11 +87,8 @@ function BatchExplorerInner() {
   useEffect(() => {
     if (!isLoggedIn || !batchId) return;
     let active = true;
-    if (page === 1) {
-      setLoading(true);
-    } else {
-      setLoadingMore(true);
-    }
+    if (page === 1) setLoading(true);
+    else setLoadingMore(true);
 
     const qParams = new URLSearchParams();
     if (folderId) qParams.set("folderId", folderId);
@@ -121,11 +107,7 @@ function BatchExplorerInner() {
         if (res?.ok) {
           setData(res);
           if (page === 1) {
-            if (res.videos.length === 0 && res.pdfs.length > 0) {
-              setMediaTab("PDF");
-            } else {
-              setMediaTab("VIDEO");
-            }
+            setMediaTab(res.videos.length === 0 && res.pdfs.length > 0 ? "PDF" : "VIDEO");
           }
         }
       })
@@ -142,9 +124,7 @@ function BatchExplorerInner() {
     };
   }, [batchId, folderId, isLoggedIn, page]);
 
-  if (!isHydrated) {
-    return <PleaseWaitScreen title="Please wait, loading..." />;
-  }
+  if (!isHydrated) return <PleaseWaitScreen title="Please wait, loading..." />;
   if (!isLoggedIn) return <LoginGateCard />;
 
   const handleStepBack = () => {
@@ -154,10 +134,10 @@ function BatchExplorerInner() {
     }
     const crumbs = data?.breadcrumbs || [];
     if (crumbs.length >= 2) {
-      const parentCrumb = crumbs[crumbs.length - 2];
+      const parent = crumbs[crumbs.length - 2];
       router.push(
         `/batch/${encodeURIComponent(batchId)}?folderId=${encodeURIComponent(
-          parentCrumb.id
+          parent.id
         )}`
       );
     } else {
@@ -165,11 +145,11 @@ function BatchExplorerInner() {
     }
   };
 
-  const handleOpenPdfItem = (item: NodeItemUI) => {
+  const openPdf = (item: NodeItemUI) => {
     if (item.hasRealPdf) {
       navigateWithWait(
         `/pdf/${encodeURIComponent(batchId)}/${encodeURIComponent(item.id)}`,
-        "Please wait, opening PDF..."
+        "Opening notes..."
       );
     } else {
       openPdfComingSoon(item.title);
@@ -180,54 +160,56 @@ function BatchExplorerInner() {
   const hasFolders = (data?.folders.length || 0) > 0;
   const isMediaLeaf = !isRoot && !hasFolders;
 
-  const headerTitle = isRoot
-    ? "SUBJECTS"
-    : isMediaLeaf
-    ? "LECTUREs & PDFs"
-    : "CHAPTERS";
-
-  const headerSubtitle = isRoot
-    ? data?.batch?.name || ""
-    : data?.folderTitle || "";
-
-  const totalFoldersCount =
-    data?.pagination?.totalFolders ?? data?.folders.length ?? 0;
   const totalVideosCount =
     data?.pagination?.totalVideos ?? data?.videos.length ?? 0;
   const totalPdfsCount =
     data?.pagination?.totalPdfs ?? data?.pdfs.length ?? 0;
 
+  const screenTitle = isRoot
+    ? data?.batch?.name || "Course"
+    : data?.folderTitle || "Chapter";
+  const screenKicker = isRoot
+    ? "Course contents"
+    : isMediaLeaf
+    ? "Chapter material"
+    : "Inside chapter";
+
   return (
-    <div className="mx-auto min-h-screen max-w-4xl pb-16">
-      {/* Top Sticky Header */}
-      <header className="sticky top-0 z-30 border-b border-white/10 bg-[#07091b]/95 px-4 py-3.5 backdrop-blur-md">
-        <div className="flex items-center gap-3.5">
-          <GlowingBackButton onClick={handleStepBack} />
+    <div className="mx-auto min-h-screen w-full max-w-4xl">
+      {/* ───────────── Top bar ───────────── */}
+      <header className="sticky top-0 z-30 border-b border-white/[0.07] bg-[#08090f]/92 backdrop-blur-sm">
+        <div className="flex items-center gap-3 px-4 py-3 sm:px-6">
+          <button
+            type="button"
+            onClick={handleStepBack}
+            aria-label="Go back"
+            className="flex h-9 w-9 shrink-0 items-center justify-center rounded-xl border border-white/12 bg-white/[0.04] text-sand-200 transition hover:border-ember-500/45 hover:text-ember-300"
+          >
+            <ArrowLeft className="h-[18px] w-[18px]" />
+          </button>
           <div className="min-w-0 flex-1">
-            <h1 className="truncate text-lg sm:text-xl font-black tracking-wide text-white">
-              {headerTitle}
+            <p className="text-[10px] font-bold uppercase tracking-[0.18em] text-ember-400">
+              {screenKicker}
+            </p>
+            <h1 className="truncate font-display text-[16px] font-semibold leading-tight text-sand-100">
+              {screenTitle}
             </h1>
-            {headerSubtitle && (
-              <p className="truncate text-xs font-bold text-amber-300/90">
-                {headerSubtitle}
-              </p>
-            )}
           </div>
         </div>
 
-        {/* Clickable Breadcrumb Trail */}
+        {/* breadcrumbs — plain text trail, no pills */}
         {!isRoot && data?.breadcrumbs && data.breadcrumbs.length > 0 && (
-          <div className="mt-2.5 flex items-center gap-1.5 overflow-x-auto whitespace-nowrap pb-0.5 text-[11px] font-semibold text-slate-400">
+          <div className="flex items-center gap-1 overflow-x-auto whitespace-nowrap px-4 pb-2.5 text-[11px] font-medium text-sand-500 sm:px-6">
             <button
               type="button"
               onClick={() => router.push(`/batch/${encodeURIComponent(batchId)}`)}
-              className="hover:text-cyan-300"
+              className="shrink-0 hover:text-ember-300"
             >
-              Batch
+              Course
             </button>
             {data.breadcrumbs.map((b, idx) => (
               <React.Fragment key={b.id}>
-                <span className="text-slate-600">›</span>
+                <ChevronRight className="h-3 w-3 shrink-0 text-sand-500/60" />
                 <button
                   type="button"
                   onClick={() =>
@@ -239,8 +221,8 @@ function BatchExplorerInner() {
                   }
                   className={
                     idx === data.breadcrumbs.length - 1
-                      ? "font-bold text-cyan-300"
-                      : "hover:text-cyan-200"
+                      ? "shrink-0 font-semibold text-sand-200"
+                      : "shrink-0 hover:text-ember-300"
                   }
                 >
                   {b.title}
@@ -251,333 +233,240 @@ function BatchExplorerInner() {
         )}
       </header>
 
-      <main className="px-4 pt-5">
-        {/* ROOT TABS: SUBJECTS | TEST | LIVE */}
-        {isRoot && (
-          <div className="glass-card mb-6 grid grid-cols-3 gap-2 rounded-2xl border border-white/10 p-2">
-            <button
-              type="button"
-              onClick={() => setRootTab("SUBJECTS")}
-              className={`rounded-xl py-2.5 text-xs font-black uppercase tracking-widest transition-all ${
-                rootTab === "SUBJECTS"
-                  ? "border border-indigo-400/60 bg-gradient-to-r from-indigo-600 to-purple-600 text-white"
-                  : "text-slate-300 hover:bg-white/5"
-              }`}
-            >
-              SUBJECTS
-            </button>
-            <button
-              type="button"
-              onClick={() => setRootTab("TEST")}
-              className={`flex items-center justify-center gap-1.5 rounded-xl py-2.5 text-xs font-black uppercase tracking-widest transition-all ${
-                rootTab === "TEST"
-                  ? "border border-cyan-400/60 bg-gradient-to-r from-cyan-600 to-blue-600 text-white"
-                  : "text-slate-300 hover:bg-white/5"
-              }`}
-            >
-              <Trophy className="h-3.5 w-3.5" />
-              <span>TEST</span>
-            </button>
-            <button
-              type="button"
-              onClick={() => setRootTab("LIVE")}
-              className={`flex items-center justify-center gap-1.5 rounded-xl py-2.5 text-xs font-black uppercase tracking-widest transition-all ${
-                rootTab === "LIVE"
-                  ? "border border-rose-400/60 bg-gradient-to-r from-rose-600 to-pink-600 text-white"
-                  : "text-slate-300 hover:bg-white/5"
-              }`}
-            >
-              <Radio className="h-3.5 w-3.5" />
-              <span>LIVE</span>
-            </button>
+      <main className="px-4 pb-16 pt-5 sm:px-6">
+        {loading ? (
+          <PleaseWaitScreen title="Loading contents..." />
+        ) : !data ? (
+          <div className="surface rounded-card px-6 py-14 text-center">
+            <p className="font-display text-lg font-semibold text-sand-100">
+              Could not load this course
+            </p>
+            <p className="mt-1.5 text-[13px] text-sand-400">
+              Please go back and try again.
+            </p>
           </div>
-        )}
-
-        {isRoot && rootTab === "TEST" && (
-          <ComingSoonState
-            accent="cyan"
-            badge="IN PROGRESS • COMING SOON"
-            title="Online Test Series — Coming Soon!"
-            subtitle="Chapter-wise MCQ Tests, Live Leaderboard aur Instant Score Analysis jaldi hi yahan live hoga!"
-          />
-        )}
-
-        {isRoot && rootTab === "LIVE" && (
-          <ComingSoonState
-            accent="pink"
-            badge="IN PROGRESS • COMING SOON"
-            title="Live Interactive Classes — Coming Soon!"
-            subtitle="Real-time Live Stream aur Live Doubt Chat abhi setup ho raha hai. Recorded lectures SUBJECTS tab me dekhein!"
-          />
-        )}
-
-        {/* CLEAR LOADING INDICATOR */}
-        {loading && (!isRoot || rootTab === "SUBJECTS") && (
-          <PleaseWaitScreen
-            title="Please wait, loading folder..."
-            subtitle="Is folder ke subjects aur lectures load ho rahe hain..."
-          />
-        )}
-
-        {/* CONTENT EXPLORER */}
-        {!loading && data && (!isRoot || rootTab === "SUBJECTS") && (
-          <div>
-            {isRoot && totalFoldersCount > 0 && (
-              <p className="mb-3.5 text-xs font-extrabold uppercase tracking-widest text-slate-300">
-                TOTAL SUBJECTS:{" "}
-                <span className="text-cyan-300">{totalFoldersCount}</span>
-              </p>
-            )}
-
-            {/* 1. SUBFOLDERS / SUBJECTS / CHAPTERS LIST */}
+        ) : (
+          <>
+            {/* ───────────── Subjects / chapters (list, editorial rows) ───────── */}
             {data.folders.length > 0 && (
-              <div className="space-y-3.5">
-                {data.folders.map((folder) => (
-                  <button
-                    key={folder.id}
-                    type="button"
-                    onClick={() =>
-                      router.push(
-                        `/batch/${encodeURIComponent(
-                          batchId
-                        )}?folderId=${encodeURIComponent(folder.id)}`
-                      )
-                    }
-                    className={`glass-card glass-card-hover perf-card-item flex w-full items-center gap-4 rounded-3xl border p-3.5 text-left ${
-                      folder.important
-                        ? "border-amber-400/55 shadow-[0_0_22px_rgba(251,191,36,0.14)]"
-                        : "border-white/10"
-                    }`}
-                  >
-                    <div className="relative h-16 w-16 shrink-0 overflow-hidden rounded-2xl border border-cyan-400/30 bg-[#0d1230] p-0.5">
-                      <SafeImage
-                        src={folder.thumbnail}
-                        fallbackSrc={config.defaultImageUrl}
-                        alt={folder.title}
-                        className="h-full w-full rounded-[14px] object-cover"
-                      />
-                      {folder.important && (
-                        <span className="absolute -right-1 -top-1 flex h-5 w-5 items-center justify-center rounded-full bg-amber-400 text-slate-950 shadow">
-                          <Star className="h-3 w-3 fill-slate-950" />
-                        </span>
-                      )}
-                    </div>
-
-                    <div className="min-w-0 flex-1">
-                      <div className="flex flex-wrap items-center gap-1.5">
-                        {folder.important && (
-                          <span className="inline-flex items-center gap-1 rounded-full bg-amber-400/20 border border-amber-400/50 px-2 py-0.5 text-[10px] font-black uppercase text-amber-300">
-                            <Star className="h-2.5 w-2.5 fill-amber-300 text-amber-300" />
-                            <span>IMPORTANT</span>
-                          </span>
-                        )}
-                        <h3 className="truncate text-base sm:text-lg font-extrabold text-white">
-                          {folder.title}
-                        </h3>
-                      </div>
-
-                      <div className="mt-1.5 flex flex-wrap items-center gap-2 text-xs font-bold">
-                        {isRoot && folder.hasSubfolders ? (
-                          <span className="inline-flex items-center gap-1.5 text-emerald-400">
-                            <Play className="h-3.5 w-3.5 fill-cyan-400 text-cyan-400" />
-                            <span>CHAPTERS</span>
-                          </span>
-                        ) : (
-                          <span className="inline-flex items-center gap-1.5 text-rose-400">
-                            <Play className="h-3.5 w-3.5 fill-cyan-400 text-cyan-400" />
-                            <span>Lectures aur PDF dekho</span>
-                          </span>
-                        )}
-
-                        {(folder.videosCount > 0 || folder.filesCount > 0) && (
-                          <span className="rounded-full border border-white/10 bg-white/5 px-2.5 py-0.5 text-[10px] text-slate-300">
-                            {folder.videosCount > 0
-                              ? `${folder.videosCount} Videos`
-                              : ""}
-                            {folder.videosCount > 0 && folder.filesCount > 0
-                              ? " • "
-                              : ""}
-                            {folder.filesCount > 0
-                              ? `${folder.filesCount} PDFs`
-                              : ""}
-                          </span>
-                        )}
-                      </div>
-                    </div>
-
-                    <FolderOpen className="mr-1 h-5 w-5 shrink-0 text-cyan-300/70" />
-                  </button>
-                ))}
-              </div>
-            )}
-
-            {/* 2. LEAF MEDIA VIEW (VIDEO | PDF Toggle Tabs) */}
-            {(totalVideosCount > 0 || totalPdfsCount > 0) && (
-              <div className={data.folders.length > 0 ? "mt-8" : ""}>
-                <div className="glass-card mb-5 grid grid-cols-2 gap-2 rounded-2xl border border-white/10 p-2">
-                  <button
-                    type="button"
-                    onClick={() => setMediaTab("VIDEO")}
-                    className={`flex items-center justify-center gap-2 rounded-xl py-3 text-xs font-black uppercase tracking-widest transition-all ${
-                      mediaTab === "VIDEO"
-                        ? "border border-indigo-400/60 bg-gradient-to-r from-indigo-600 to-purple-600 text-white"
-                        : "text-slate-300 hover:bg-white/5"
-                    }`}
-                  >
-                    <PlayCircle className="h-4 w-4" />
-                    <span>VIDEO ({totalVideosCount})</span>
-                  </button>
-
-                  <button
-                    type="button"
-                    onClick={() => setMediaTab("PDF")}
-                    className={`flex items-center justify-center gap-2 rounded-xl py-3 text-xs font-black uppercase tracking-widest transition-all ${
-                      mediaTab === "PDF"
-                        ? "border border-rose-400/60 bg-gradient-to-r from-rose-600 to-pink-600 text-white"
-                        : "text-slate-300 hover:bg-white/5"
-                    }`}
-                  >
-                    <FileText className="h-4 w-4" />
-                    <span>PDF ({totalPdfsCount})</span>
-                  </button>
+              <section aria-label="Subjects">
+                <div className="mb-3 flex items-baseline justify-between">
+                  <h2 className="text-[11px] font-bold uppercase tracking-[0.2em] text-sand-400">
+                    {isRoot ? "Subjects" : "Chapters"}
+                  </h2>
+                  <span className="text-[11px] font-semibold text-sand-500">
+                    {data.pagination?.totalFolders ?? data.folders.length}
+                  </span>
                 </div>
 
-                {/* VIDEO LECTURES LIST */}
+                <div className="divide-y divide-white/[0.06] overflow-hidden rounded-card border border-white/[0.08] bg-ink-900/55">
+                  {data.folders.map((folder, idx) => (
+                    <button
+                      key={folder.id}
+                      type="button"
+                      onClick={() =>
+                        router.push(
+                          `/batch/${encodeURIComponent(
+                            batchId
+                          )}?folderId=${encodeURIComponent(folder.id)}`
+                        )
+                      }
+                      className="group flex w-full items-center gap-3.5 px-3.5 py-3.5 text-left transition-colors hover:bg-white/[0.035]"
+                    >
+                      {/* index / thumb */}
+                      <div className="relative h-11 w-11 shrink-0 overflow-hidden rounded-lg border border-white/10 bg-ink-850">
+                        {folder.thumbnail ? (
+                          <SafeImage
+                            src={folder.thumbnail}
+                            fallbackSrc={config.defaultImageUrl}
+                            alt={folder.title}
+                            className="h-full w-full object-cover"
+                          />
+                        ) : (
+                          <span className="flex h-full w-full items-center justify-center font-display text-[15px] font-semibold text-sand-400">
+                            {String(idx + 1).padStart(2, "0")}
+                          </span>
+                        )}
+                      </div>
+
+                      <div className="min-w-0 flex-1">
+                        <div className="flex items-center gap-2">
+                          <h3 className="truncate text-[14.5px] font-semibold text-sand-100 group-hover:text-ember-300">
+                            {folder.title}
+                          </h3>
+                          {folder.important && (
+                            <span className="shrink-0 rounded-tag border border-ember-400/45 px-1.5 py-[1px] text-[9px] font-extrabold uppercase tracking-wider text-ember-300">
+                              Key
+                            </span>
+                          )}
+                        </div>
+                        <p className="mt-0.5 flex flex-wrap items-center gap-x-2.5 text-[11px] font-medium text-sand-500">
+                          {folder.hasSubfolders ? (
+                            <span className="text-sand-400">Folder</span>
+                          ) : (
+                            <span>Lectures &amp; notes</span>
+                          )}
+                          {folder.videosCount > 0 && (
+                            <span>{folder.videosCount} lectures</span>
+                          )}
+                          {folder.filesCount > 0 && (
+                            <span className="text-sage-400">
+                              {folder.filesCount} notes
+                            </span>
+                          )}
+                        </p>
+                      </div>
+
+                      <ChevronRight className="h-4 w-4 shrink-0 text-sand-500 transition-transform group-hover:translate-x-0.5 group-hover:text-ember-400" />
+                    </button>
+                  ))}
+                </div>
+              </section>
+            )}
+
+            {/* ───────────── Media: VIDEO | PDF (segmented, no LIVE) ───────── */}
+            {(totalVideosCount > 0 || totalPdfsCount > 0) && (
+              <section className={data.folders.length > 0 ? "mt-8" : ""}>
+                {/* Segmented switch — flat rail, sliding ember underline */}
+                <div className="relative mb-5 flex items-center gap-1 border-b border-white/[0.08]">
+                  {(
+                    [
+                      {
+                        key: "VIDEO" as MediaTab,
+                        label: "Lectures",
+                        count: totalVideosCount,
+                      },
+                      {
+                        key: "PDF" as MediaTab,
+                        label: "Notes",
+                        count: totalPdfsCount,
+                      },
+                    ] as const
+                  ).map((t) => {
+                    const active = mediaTab === t.key;
+                    return (
+                      <button
+                        key={t.key}
+                        type="button"
+                        onClick={() => setMediaTab(t.key)}
+                        className={`relative -mb-px inline-flex items-center gap-1.5 px-4 py-2.5 text-[12px] font-bold uppercase tracking-[0.12em] transition-colors ${
+                          active
+                            ? "text-ember-300"
+                            : "text-sand-500 hover:text-sand-200"
+                        }`}
+                      >
+                        {t.key === "VIDEO" ? (
+                          <Play className="h-3.5 w-3.5" />
+                        ) : (
+                          <FileText className="h-3.5 w-3.5" />
+                        )}
+                        <span>{t.label}</span>
+                        <span
+                          className={`rounded px-1.5 py-px text-[10px] font-extrabold ${
+                            active
+                              ? "bg-ember-500/20 text-ember-300"
+                              : "bg-white/[0.06] text-sand-500"
+                          }`}
+                        >
+                          {t.count}
+                        </span>
+                        {active && (
+                          <span className="absolute inset-x-0 -bottom-px h-[2px] rounded-full bg-ember-500" />
+                        )}
+                      </button>
+                    );
+                  })}
+                </div>
+
+                {/* ── VIDEO: wide horizontal rows with left-aligned play ── */}
                 {mediaTab === "VIDEO" && (
                   <>
                     {data.videos.length === 0 ? (
-                      <div className="glass-card rounded-3xl border border-white/10 p-8 text-center text-sm font-semibold text-slate-400">
-                        Is folder me abhi koi video lecture nahi hai. PDF tab check
-                        karein!
-                      </div>
+                      <EmptyNote text="No lectures in this chapter yet." />
                     ) : (
-                      <div className="grid grid-cols-1 gap-5 md:grid-cols-2">
-                        {data.videos.map((video) => (
-                          <div
+                      <div className="space-y-2.5">
+                        {data.videos.map((video, i) => (
+                          <button
                             key={video.id}
-                            className={`glass-card glass-card-hover perf-card-item flex flex-col overflow-hidden rounded-3xl border p-3.5 ${
-                              video.important
-                                ? "border-amber-400/55"
-                                : "border-white/10"
-                            }`}
+                            type="button"
+                            onClick={() =>
+                              navigateWithWait(
+                                `/watch/${encodeURIComponent(
+                                  batchId
+                                )}/${encodeURIComponent(video.id)}`,
+                                "Opening lecture..."
+                              )
+                            }
+                            className="surface group flex w-full items-center gap-3.5 rounded-xl p-2.5 text-left transition-colors hover:border-ember-500/40"
                           >
-                            <button
-                              type="button"
-                              onClick={() =>
-                                navigateWithWait(
-                                  `/watch/${encodeURIComponent(
-                                    batchId
-                                  )}/${encodeURIComponent(video.id)}`,
-                                  "Please wait, loading lecture..."
-                                )
-                              }
-                              className="group relative aspect-[16/9] w-full overflow-hidden rounded-2xl bg-[#0b0f26] text-left"
-                            >
+                            <div className="relative h-[54px] w-24 shrink-0 overflow-hidden rounded-lg bg-ink-850">
                               <SafeImage
                                 src={video.thumbnail}
                                 fallbackSrc={config.defaultImageUrl}
                                 alt={video.title}
                                 className="h-full w-full object-cover"
                               />
-                              {video.important && (
-                                <span className="absolute left-2.5 top-2.5 inline-flex items-center gap-1 rounded-full bg-amber-400 px-2.5 py-0.5 text-[10px] font-black text-slate-950">
-                                  <Star className="h-3 w-3 fill-slate-950" />
-                                  IMPORTANT
-                                </span>
-                              )}
-                              <div className="absolute inset-0 flex items-center justify-center bg-black/25">
-                                <div className="flex h-11 w-11 items-center justify-center rounded-full bg-cyan-400/90 text-slate-950 shadow-glow-cyan">
-                                  <Play className="h-5 w-5 translate-x-0.5 fill-slate-950" />
-                                </div>
-                              </div>
-                            </button>
-
-                            <h4 className="mt-3.5 line-clamp-2 text-base font-extrabold text-white">
-                              {video.title}
-                            </h4>
-
-                            {video.uploadedAt && (
-                              <div className="mt-2 inline-flex w-fit items-center gap-1.5 rounded-full border border-white/10 bg-white/5 px-3 py-1 text-[11px] font-semibold text-slate-300">
-                                <Calendar className="h-3.5 w-3.5 text-cyan-300" />
-                                <span>Upload: {video.uploadedAt}</span>
-                              </div>
-                            )}
-
-                            <div className="mt-4 space-y-2.5">
-                              <button
-                                type="button"
-                                onClick={() =>
-                                  navigateWithWait(
-                                    `/watch/${encodeURIComponent(
-                                      batchId
-                                    )}/${encodeURIComponent(video.id)}`,
-                                    "Please wait, loading lecture..."
-                                  )
-                                }
-                                className="flex w-full items-center justify-center gap-2 rounded-2xl bg-gradient-to-r from-indigo-600 via-blue-600 to-purple-600 py-3 text-xs font-black uppercase tracking-widest text-white transition hover:brightness-110 active:scale-[0.98]"
-                              >
-                                <Play className="h-4 w-4 fill-white" />
-                                <span>PLAY</span>
-                              </button>
-
-                              <button
-                                type="button"
-                                onClick={() => handleOpenPdfItem(video)}
-                                className="flex w-full items-center justify-center gap-2 rounded-2xl border border-rose-500/45 bg-gradient-to-r from-rose-600/90 to-pink-600/90 py-3 text-xs font-black uppercase tracking-widest text-white transition hover:brightness-110 active:scale-[0.98]"
-                              >
-                                <FileText className="h-4 w-4" />
-                                <span>
-                                  {video.hasRealPdf ? "OPEN PDF NOTES" : "PDF"}
-                                </span>
-                              </button>
+                              <span className="absolute inset-0 flex items-center justify-center bg-ink-950/40 transition-colors group-hover:bg-ink-950/20">
+                                <Play className="h-4 w-4 fill-sand-100 text-sand-100" />
+                              </span>
+                              <span className="absolute bottom-1 left-1 rounded bg-ink-950/85 px-1 text-[9px] font-bold text-sand-300">
+                                {String(i + 1).padStart(2, "0")}
+                              </span>
                             </div>
-                          </div>
+
+                            <div className="min-w-0 flex-1">
+                              <h4 className="line-clamp-2 text-[13.5px] font-semibold leading-snug text-sand-100 group-hover:text-ember-300">
+                                {video.title}
+                              </h4>
+                              <p className="mt-1 flex flex-wrap items-center gap-x-2.5 text-[10.5px] font-medium text-sand-500">
+                                {video.uploadedAt && <span>{video.uploadedAt}</span>}
+                                {video.hasAttachedPdf && (
+                                  <span className="text-sage-400">Notes attached</span>
+                                )}
+                              </p>
+                            </div>
+
+                            <Play className="mr-1.5 h-4 w-4 shrink-0 text-ember-400 opacity-0 transition-opacity group-hover:opacity-100" />
+                          </button>
                         ))}
                       </div>
                     )}
                   </>
                 )}
 
-                {/* PDF NOTES LIST */}
+                {/* ── PDF: document-style rows, file glyph + direct action ── */}
                 {mediaTab === "PDF" && (
                   <>
                     {data.pdfs.length === 0 ? (
-                      <div className="glass-card rounded-3xl border border-white/10 p-8 text-center text-sm font-semibold text-slate-400">
-                        Is chapter me abhi koi PDF note nahi hai.
-                      </div>
+                      <EmptyNote text="No notes in this chapter yet." />
                     ) : (
-                      <div className="space-y-3.5">
-                        {data.pdfs.map((pdf) => (
+                      <div className="overflow-hidden rounded-card border border-white/[0.08] bg-ink-900/55">
+                        {data.pdfs.map((pdf, i) => (
                           <div
                             key={`pdf_${pdf.id}`}
-                            className="glass-card glass-card-hover perf-card-item rounded-3xl border border-white/10 p-4"
+                            className={`flex items-center gap-3 px-3.5 py-3 transition-colors hover:bg-white/[0.03] ${
+                              i > 0 ? "border-t border-white/[0.06]" : ""
+                            }`}
                           >
-                            <div className="flex items-start gap-3.5">
-                              <div className="flex h-12 w-12 shrink-0 items-center justify-center rounded-2xl border border-rose-400/40 bg-gradient-to-br from-rose-600 to-pink-700 text-white">
-                                <FileText className="h-6 w-6" />
-                              </div>
-                              <div className="min-w-0 flex-1">
-                                <h4 className="text-base font-extrabold text-white">
-                                  {pdf.title}
-                                </h4>
-                                {pdf.uploadedAt && (
-                                  <p className="mt-1 inline-flex items-center gap-1.5 text-xs font-medium text-slate-400">
-                                    <Calendar className="h-3.5 w-3.5 text-rose-300" />
-                                    <span>{pdf.uploadedAt}</span>
-                                  </p>
-                                )}
-                              </div>
+                            <div className="flex h-10 w-9 shrink-0 items-center justify-center rounded-md border border-white/12 bg-ink-850">
+                              <FileText className="h-4 w-4 text-sage-400" />
+                            </div>
+
+                            <div className="min-w-0 flex-1">
+                              <h4 className="line-clamp-2 text-[13.5px] font-semibold text-sand-100">
+                                {pdf.title}
+                              </h4>
+                              <p className="mt-0.5 text-[10.5px] font-medium text-sand-500">
+                                {pdf.uploadedAt || "PDF document"}
+                              </p>
                             </div>
 
                             <button
                               type="button"
-                              onClick={() => handleOpenPdfItem(pdf)}
-                              className="mt-4 flex w-full items-center justify-center gap-2 rounded-2xl bg-gradient-to-r from-rose-600 via-red-600 to-pink-600 py-3 text-xs font-black uppercase tracking-widest text-white transition hover:brightness-110 active:scale-[0.98]"
+                              onClick={() => openPdf(pdf)}
+                              className="btn-ghost shrink-0 px-3 py-1.5 text-[11px] uppercase tracking-[0.1em]"
                             >
-                              <FileText className="h-4 w-4" />
-                              <span>
-                                {pdf.hasRealPdf ? "VIEW PDF IN WEBSITE" : "PDF"}
-                              </span>
+                              {pdf.hasRealPdf ? "View" : "Open"}
                             </button>
                           </div>
                         ))}
@@ -585,43 +474,43 @@ function BatchExplorerInner() {
                     )}
                   </>
                 )}
-              </div>
+              </section>
             )}
 
-            {/* PAGINATION "LOAD MORE" BUTTON FOR LARGE FOLDERS */}
+            {/* Load more */}
             {data.pagination?.hasMore && (
-              <div className="mt-7 text-center">
+              <div className="mt-6 text-center">
                 <button
                   type="button"
                   disabled={loadingMore}
                   onClick={() => setPage((p) => p + 1)}
-                  className="inline-flex items-center gap-2 rounded-2xl border border-cyan-400/45 bg-cyan-500/15 px-7 py-3.5 text-xs font-black uppercase tracking-widest text-cyan-200 transition hover:bg-cyan-500/25 disabled:opacity-60"
+                  className="btn-ghost px-6 py-2.5 text-[11px] uppercase tracking-[0.14em] disabled:opacity-60"
                 >
                   {loadingMore ? (
                     <>
-                      <Loader2 className="h-4 w-4 animate-spin" />
-                      <span>Please wait, loading more...</span>
+                      <Loader2 className="h-3.5 w-3.5 animate-spin" />
+                      <span>Loading</span>
                     </>
                   ) : (
-                    <span>Load More Items</span>
+                    <span>Load more</span>
                   )}
                 </button>
               </div>
             )}
 
-            {/* 3. DIRECT EXTERNAL LINKS */}
+            {/* External links */}
             {data.links.length > 0 && (
-              <div className="mt-6 space-y-3">
+              <section className="mt-7 space-y-2.5">
                 {data.links.map((lnk) => (
                   <a
                     key={lnk.id}
                     href={lnk.link || "#"}
                     target="_blank"
                     rel="noopener noreferrer"
-                    className="glass-card glass-card-hover flex items-center justify-between gap-4 rounded-3xl border border-emerald-400/30 p-3.5"
+                    className="surface flex items-center justify-between gap-3 rounded-xl p-3 transition-colors hover:border-sage-400/40"
                   >
-                    <div className="flex items-center gap-3.5">
-                      <div className="h-12 w-12 overflow-hidden rounded-2xl border border-emerald-400/40 bg-[#0d1f1a]">
+                    <div className="flex min-w-0 items-center gap-3">
+                      <div className="h-9 w-9 shrink-0 overflow-hidden rounded-lg border border-white/10 bg-ink-850">
                         <SafeImage
                           src={lnk.thumbnail}
                           fallbackSrc={config.defaultImageUrl}
@@ -629,50 +518,55 @@ function BatchExplorerInner() {
                           className="h-full w-full object-cover"
                         />
                       </div>
-                      <div>
-                        <h4 className="text-sm font-extrabold text-white">
+                      <div className="min-w-0">
+                        <h4 className="truncate text-[13px] font-semibold text-sand-100">
                           {lnk.title}
                         </h4>
-                        <p className="text-xs font-semibold text-emerald-300">
-                          Tap to Open Channel / Group
+                        <p className="text-[10.5px] font-medium text-sage-400">
+                          External link
                         </p>
                       </div>
                     </div>
-                    <ExternalLink className="mr-2 h-5 w-5 text-emerald-300" />
+                    <ExternalLink className="h-4 w-4 shrink-0 text-sage-400" />
                   </a>
                 ))}
-              </div>
+              </section>
             )}
 
-            {/* Empty Folder State */}
+            {/* Empty batch */}
             {data.folders.length === 0 &&
               data.videos.length === 0 &&
               data.pdfs.length === 0 &&
               data.links.length === 0 && (
-                <ComingSoonState
-                  accent="cyan"
-                  badge="UPLOADING SOON"
-                  title="Lectures Uploading Soon!"
-                  subtitle="Is batch ke folders aur lectures jald hi update kiye jayenge."
-                />
+                <div className="surface rounded-card px-6 py-16 text-center">
+                  <Sparkles className="mx-auto h-7 w-7 text-ember-400" />
+                  <p className="mt-3 font-display text-lg font-semibold text-sand-100">
+                    Material coming soon
+                  </p>
+                  <p className="mx-auto mt-1.5 max-w-xs text-[13px] leading-relaxed text-sand-400">
+                    Lectures and notes for this course are being added.
+                  </p>
+                </div>
               )}
-          </div>
+          </>
         )}
       </main>
     </div>
   );
 }
 
+function EmptyNote({ text }: { text: string }) {
+  return (
+    <div className="rounded-xl border border-dashed border-white/[0.12] px-5 py-10 text-center">
+      <BookOpen className="mx-auto h-5 w-5 text-sand-500" />
+      <p className="mt-2 text-[12.5px] font-medium text-sand-400">{text}</p>
+    </div>
+  );
+}
+
 export default function BatchExplorerPage() {
   return (
-    <Suspense
-      fallback={
-        <PleaseWaitScreen
-          title="Please wait, loading folder..."
-          subtitle="Course data open ho raha hai..."
-        />
-      }
-    >
+    <Suspense fallback={<PleaseWaitScreen title="Loading course..." />}>
       <BatchExplorerInner />
     </Suspense>
   );

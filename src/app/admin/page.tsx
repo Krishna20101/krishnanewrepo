@@ -282,7 +282,7 @@ export default function AdminDashboardPage() {
   const [tgTargetBatchId, setTgTargetBatchId] = useState("AUTO");
   const [tgCustomTitle, setTgCustomTitle] = useState("");
   const [tgCustomPrice, setTgCustomPrice] = useState("0");
-  const [tgMessageLimit, setTgMessageLimit] = useState("1500");
+  const [tgMessageLimit, setTgMessageLimit] = useState("2500");
   const [tgSyncing, setTgSyncing] = useState(false);
   const [tgSyncStatusMsg, setTgSyncStatusMsg] = useState<{
     ok: boolean;
@@ -401,7 +401,7 @@ export default function AdminDashboardPage() {
           existingCreatedBatchId: overrideGroup?.createdBatchId || "",
           customCourseTitle: overrideGroup ? overrideGroup.title : tgCustomTitle,
           customCoursePrice: tgCustomPrice,
-          messageLimit: Number(tgMessageLimit) || 1500,
+          messageLimit: Number(tgMessageLimit) || 2500,
           apiId: tgApiId || undefined,
           apiHash: tgApiHash || undefined,
           sessionString: tgSessionString || undefined,
@@ -2417,7 +2417,7 @@ export default function AdminDashboardPage() {
                     <input
                       type="number"
                       min={50}
-                      max={5000}
+                      max={10000}
                       value={tgMessageLimit}
                       onChange={(e) => setTgMessageLimit(e.target.value)}
                       className="w-full rounded-xl border border-white/15 bg-[#060919] px-3 py-2 text-xs font-semibold text-white outline-none"

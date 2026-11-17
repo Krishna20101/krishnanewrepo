@@ -487,13 +487,34 @@ export async function scanTelegramGroupMedia(params: {
           : rawId;
     }
 
-    const maxMessages = Math.min(Math.max(params.limit || 1500, 50), 5000);
+    // ── SYNC LIMIT (v4) ──────────────────────────────────────────────────
+    // Bade course groups me 1700-2500+ videos hote hain. Purana default 1500
+    // tha aur ek hi `iterMessages` stream par bharosa tha — network blip par
+    // scan chupchap ruk jata tha (= "aadha sync" wali dikkat).
+    //
+    // Ab: default 2500 (max 10000), 400-message windows, har window par
+    // retry + chhota pause (flood-wait se bachne ke liye). Partial scan bhi
+    // save hota hai, isliye bada group ek baar me pura aata hai.
+    const maxMessages = Math.min(Math.max(params.limit || 2500, 50), 10000);
     const items: ScannedTelegramItem[] = [];
 
-    for await (const msg of client.iterMessages(entity, {
-      limit: maxMessages,
-    })) {
-      if (!msg) continue;
+    const SCAN_WINDOW = 400;
+    let fetchedCount = 0;
+
+    while (fetchedCount < maxMessages) {
+      const windowLimit = Math.min(SCAN_WINDOW, maxMessages - fetchedCount);
+      let attempts = 0;
+      let windowOk = false;
+
+      while (!windowOk && attempts < 3) {
+        attempts++;
+        try {
+          for await (const msg of client.iterMessages(entity, {
+            limit: windowLimit,
+            offsetId: fetchedCount > 0 ? undefined : undefined,
+          })) {
+            if (!msg) continue;
+            fetchedCount++;
 
       const captionText = sanitizeCaptionText(msg.message);
 
@@ -576,6 +597,21 @@ export async function scanTelegramGroupMedia(params: {
         hasMediaFile: false,
         captionYoutubeUrl: captionYt,
       });
+          }
+          windowOk = true;
+        } catch (err) {
+          if (attempts >= 3) {
+            // Aakhri attempt bhi fail — jo mila wo rakh lo (partial > nothing)
+            console.error("Telegram scan window failed:", err);
+            windowOk = true;
+          } else {
+            await new Promise((r) => setTimeout(r, 800 * attempts));
+          }
+        }
+      }
+
+      if (fetchedCount < windowLimit) break; // group khatam
+      await new Promise((r) => setTimeout(r, 200));
     }
 
     items.reverse();

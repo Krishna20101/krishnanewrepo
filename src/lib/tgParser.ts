@@ -179,11 +179,114 @@ function deriveChapterTitle(cleanTitle: string): string {
   return base;
 }
 
+/**
+ * Caption normalisation (v4 — bahut zyada flexible extraction)
+ * ---------------------------------------------------------------------------
+ * Real Telegram captions me ye sab variations aati hain, aur pehle parser
+ * inme se kai miss kar deta tha:
+ *
+ *   Title : Lecture 05            Title - Lecture 05
+ *   ➤ Title: Lecture 05           【Title】 Lecture 05
+ *   टाइटल: लेक्चर 05               TITLE = Lecture 05
+ *   📚 Batch : 12th Physics        Course Name » 12th Physics
+ *   Topic: Motion                  Chapter — Motion
+ *   विषय: गति                       Subject | Physics
+ *
+ * Isliye: (1) emoji/bullets/box-chars strip, (2) Hindi labels support,
+ * (3) `:` `-` `–` `—` `=` `»` `|` sab separators, (4) labels ke around
+ * brackets space tolerate, (5) caption single line me `|` se separated ho
+ * to bhi pieces nikal aate hain, (6) kuch bhi label na mile to pehli
+ * non-noise line title ban jati hai.
+ */
+const CAPTION_LEAD_NOISE = new RegExp(
+  "^[\\s\\u2000-\\u2BFF\\u2600-\\u27BF\\uFE0F\\uD83C-\\uDBFF\\uDC00-\\uDFFF" +
+    "•·●○▪◾➤➢➜➔→»«|\\-–—_*=~·]+",
+  "u"
+);
+
+const LABEL_SEP = /^[\s:*=–—»|\-~]+\s*/;
+
+const LABEL_PATTERNS: Array<{
+  key: "index" | "link" | "title" | "topic" | "subject" | "batch";
+  regex: RegExp;
+}> = [
+  // ⚠️ Devanagari ke saath `\b` kaam nahi karta (word-boundary sirf ASCII),
+  //    isliye labels ke baad koi bhi separator/non-letter accept karte hain.
+  {
+    key: "index",
+    regex:
+      /^(?:index|idx|sr\.?\s*no\.?|s\.?no\.?|id|क्रमांक|क्रम|संख्या|नंबर|नम्बर)(?=[\s:*=–—»|\-~\]】]|$)/i,
+  },
+  {
+    key: "link",
+    regex: /^(?:link|url|youtube|yt|video\s*link|watch\s*link|लिंक)(?=[\s:*=–—»|\-~\]】]|$)/i,
+  },
+  {
+    key: "title",
+    regex:
+      /^(?:(?:title|name|lecture|video|pdf|file|titile|titel)\s*(?:name|no\.?|#)?|टाइटल|शीर्षक|लेक्चर|वीडियो|नाम|फाइल)(?=[\s:*=–—»|\-~\]】]|$)/i,
+  },
+  {
+    key: "topic",
+    regex:
+      /^(?:(?:topic|folder|chapter|section|part)\s*(?:name|no\.?|#)?|टॉपिक|टापिक|विषय|अध्याय|चैप्टर|पाठ|भाग|फोल्डर)(?=[\s:*=–—»|\-~\]】]|$)/i,
+  },
+  {
+    key: "subject",
+    regex: /^(?:(?:subject|sub)\s*(?:name)?|सब्जेक्ट|विषय-नाम)(?=[\s:*=–—»|\-~\]】]|$)/i,
+  },
+  {
+    key: "batch",
+    regex:
+      /^(?:(?:batch|course|program)\s*(?:name)?|बैच|कोर्स|प्रोग्राम)(?=[\s:*=–—»|\-~\]】]|$)/i,
+  },
+];
+
+/** `Title : xyz`, `【Title】xyz`, `★ Title - xyz`, `टाइटल: xyz` — sab handle */
+function matchLabel(line: string): { key: string; value: string } | null {
+  // box brackets / decorative wrappers around the label ko hatao
+  const cleaned = line
+    .replace(CAPTION_LEAD_NOISE, "")
+    .replace(/^[\[【(<{]+\s*/, "")
+    .trim();
+  if (!cleaned) return null;
+
+  for (const p of LABEL_PATTERNS) {
+    const m = cleaned.match(p.regex);
+    if (!m) continue;
+    const rest = cleaned.slice(m[0].length);
+    // label ke baad separator compulsory (warna "Name of chapter" bhi title ban jayega)
+    if (!LABEL_SEP.test(likelySep(rest)) && !/^\s*[\]】)>}]\s*[:\-–—=»|]/.test(rest)) {
+      // allow `【Title】xyz` style — bracket close as separator
+      const bracketClose = rest.match(/^[\]】)>}]+\s*(.*)$/);
+      if (bracketClose) {
+        const val = bracketClose[1].trim();
+        if (val) return { key: p.key, value: val };
+      }
+      continue;
+    }
+    const value = rest.replace(/^[\s\]】)>}]*[\s:*=–—»|~\-]*/, "").trim();
+    if (value) return { key: p.key, value };
+  }
+  return null;
+}
+
+function likelySep(rest: string): string {
+  return rest.replace(/^[\s\]】)>}]*/, "");
+}
+
 export function parseScannedTelegramItem(
   item: ScannedTelegramItem,
   fallbackCourseName: string
 ): ParsedTelegramItem {
-  const lines = (item.caption || "")
+  const rawCaption = (item.caption || "").replace(/\u200B|\u200C|\u200D|\uFEFF/g, "");
+
+  // Single-line captions with `|` or `•` separators → pieces me todo
+  const expanded = rawCaption.includes("\n")
+    ? rawCaption
+    : rawCaption.replace(/\s*[|•·]\s*/g, "\n");
+
+  const lines = expanded
     .split(/\r?\n/)
     .map((l) => l.trim())
     .filter(Boolean);
@@ -196,46 +299,59 @@ export function parseScannedTelegramItem(
   let rawLink = "";
 
   for (const line of lines) {
-    const idxMatch = line.match(/^(?:index|idx|sr\.?\s*no|s\.?no|id)\s*[:\-–—]\s*(\d+)/i);
-    if (idxMatch && indexNum === null) {
-      indexNum = parseInt(idxMatch[1], 10);
-      continue;
-    }
-
-    // "Link: https://youtu.be/XXXX" (caption-only YouTube lectures!)
-    const linkMatch = line.match(
-      /^(?:link|url|youtube|yt|video\s*link|watch)\s*[:\-–—]\s*(.+)$/i
-    );
-    if (linkMatch && !rawLink) {
-      rawLink = linkMatch[1].trim();
-      continue;
-    }
-
-    // Extractor crash logs must NEVER become a title/folder name
+    // extractor crash logs must NEVER become title/folder
     if (/^(?:error|traceback|exception|warning)\b/i.test(line)) continue;
 
-    const titleMatch = line.match(/^(?:title|name|lecture|video|pdf|file)\s*[:\-–—]\s*(.+)$/i);
-    if (titleMatch && !rawTitle) {
-      rawTitle = titleMatch[1].trim();
+    const hit = matchLabel(line);
+    if (!hit) continue;
+
+    if (hit.key === "index") {
+      if (indexNum === null) {
+        const num = hit.value.match(/\d+/);
+        if (num) indexNum = parseInt(num[0], 10);
+      }
       continue;
     }
-
-    const topicMatch = line.match(/^(?:topic|folder|chapter|section)\s*[:\-–—]\s*(.+)$/i);
-    if (topicMatch && !rawTopic) {
-      rawTopic = topicMatch[1].trim();
+    if (hit.key === "link") {
+      if (!rawLink) rawLink = hit.value;
       continue;
     }
-
-    const subjMatch = line.match(/^(?:subject|sub)\s*[:\-–—]\s*(.+)$/i);
-    if (subjMatch && !rawSubject) {
-      rawSubject = subjMatch[1].trim();
+    if (hit.key === "title") {
+      if (!rawTitle) rawTitle = hit.value;
       continue;
     }
-
-    const batchMatch = line.match(/^(?:batch|course|batch\s*name|course\s*name)\s*[:\-–—]\s*(.+)$/i);
-    if (batchMatch && !rawBatch) {
-      rawBatch = batchMatch[1].trim();
+    if (hit.key === "topic") {
+      if (!rawTopic) rawTopic = hit.value;
       continue;
+    }
+    if (hit.key === "subject") {
+      if (!rawSubject) rawSubject = hit.value;
+      continue;
+    }
+    if (hit.key === "batch") {
+      if (!rawBatch) rawBatch = hit.value;
+      continue;
+    }
+  }
+
+  // Agar Topic label nahi mila lekin caption me "Batch" + kuch aur lines hain,
+  // to sabse zyada "chapter jaisi" line ko topic maan lo.
+  if (!rawTopic && !rawTitle && lines.length >= 2) {
+    // ignore meta lines
+    const metaRe =
+      /^(?:index|idx|batch|course|subject|sub|link|url|youtube|yt|extracted|downloaded|uploaded|credit|channel|error|traceback|exception|warning|https?:\/\/)/i;
+    const candidates = lines.filter(
+      (l) =>
+        !metaRe.test(l.replace(CAPTION_LEAD_NOISE, "")) &&
+        !/'utf-?8'\s+codec/i.test(l) &&
+        l.length >= 3
+    );
+    if (candidates.length >= 2) {
+      // last line often "Topic", first line often title
+      rawTitle = rawTitle || candidates[0];
+      rawTopic = rawTopic || candidates[candidates.length - 1];
+    } else if (candidates.length === 1) {
+      rawTitle = rawTitle || candidates[0];
     }
   }
 

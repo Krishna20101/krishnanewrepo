@@ -1,3 +1,45 @@
+# 📘 Study helper Doc — Portal v4 "Slate & Ember"
+
+**What changed in v4 (different look, Telegram-only video, stronger sync):**
+
+| # | Change |
+|---|---|
+| 1 | **Pura naya theme** — neon cyan/purple "cyberpunk" gaya. Ab deep ink-navy canvas + warm copper accents + serif display headings. Koi glow, koi cyber grid, koi glass blur nahi. |
+| 2 | **Bottom dock hataya** — Wishlist aur Downloads ke floating tabs gaye. Downloads ab **header ke top-right corner** me icon button hai. Wishlist feature remove (purana linker `/` par redirect). |
+| 3 | **Home page simplified** — login ke baad seedha course list. Search ab plain field hai (corner-bracket animation hataya). |
+| 4 | **Naye course tiles** — flat surface, left ember rail, corner index number, hairline meta row, arrow affordance. Thumbnail hover par depth (koi neon/glow nahi). |
+| 5 | **Batch screen** — SUBJECTS / TEST / **LIVE hataya**. Ab sirf **Lectures** aur **Notes** ka segmented switch (ember underline). PDF rows document-style, video rows list-style. |
+| 6 | **Video delivery Telegram bot se** — Cloudflare Worker/Vercel streaming ki jagah ab `/watch` par **Open in Telegram** panel. Link encrypted + 20 min valid. |
+| 7 | **Content guard** — right-click, text-copy, drag, DevTools/print shortcuts block + print CSS. (Server-side protection asli hai; ye casual copying rokta hai.) |
+| 8 | **Caption parser 10x better** — Hindi labels (टाइटल/बैच/विषय), emoji/bullets, `【Title】`, `|` single-line captions, `Lecture Name =` — sab parse hote hain. |
+| 9 | **Sync limit 1500 → 2500** (max 10000) + 400-message windows with retry → 1700-2000+ videos wale groups ek hi baar me sync. |
+
+---
+
+## 🤖 Telegram Bot Gateway (naya)
+
+`/watch` screen par video ki jagah:
+
+```
+Open in Telegram  →  t.me/<bot>?start=<encrypted token>
+        ↓
+Bot decrypt karta hai (chat id + message id) → join check (getChatMember)
+        ↓ join nahi  → "Join our channel" + "Continue" (live re-check)
+        ↓ join haan  → wahi video copyMessage se bhejta hai
+                       + "3 ghante me delete" notice
+                       → 3 ghante baad video + notice auto-delete
+```
+
+- **Source group me forwarding OFF ho to bhi kaam karta hai** — `copyMessage` use hota hai, `forwardMessage` nahi.
+- Token AES-256-GCM encrypted + 20 minute expiry → koi URL tamper nahi kar sakta.
+- Bot code: **`telegram-bot/`** (Render deploy, `telegram-bot/README.md` dekhein).
+- Site par 2 env vars: `NEXT_PUBLIC_TELEGRAM_BOT_USERNAME`, `NEXT_PUBLIC_TELEGRAM_CHANNEL_URL`.
+- Bot ko **saare course groups me admin** banayein; join gate ke liye public channel me bhi.
+
+⚠️ Bot ke env me `ADMIN_SESSION_SECRET` **Vercel wali exact same value** honi chahiye — warna link decrypt nahi hoga.
+
+---
+
 # 📘 Study helper Doc — Complete A-to-Z Portal (v3 "Smooth Edition")
 
 **Live domain:** `https://studyhelperdoc.vercel.app`

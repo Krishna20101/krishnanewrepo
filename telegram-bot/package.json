@@ -1,0 +1,18 @@
+{
+  "name": "shd-telegram-bot",
+  "version": "1.0.0",
+  "private": true,
+  "description": "Study Helper Doc — Telegram delivery bot (join-gate + forward + 3h auto-delete)",
+  "main": "bot.js",
+  "scripts": {
+    "start": "node bot.js"
+  },
+  "engines": {
+    "node": ">=18"
+  },
+  "dependencies": {
+    "dotenv": "^16.4.5",
+    "express": "^4.19.2",
+    "node-telegram-bot-api": "^0.66.0"
+  }
+}
