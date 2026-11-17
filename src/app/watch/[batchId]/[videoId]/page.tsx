@@ -16,13 +16,13 @@ import {
   Rewind,
   RotateCw,
   Share2,
-  Sparkles,
 } from "lucide-react";
 import { useApp } from "@/context/AppContext";
 import GlowingBackButton from "@/components/GlowingBackButton";
 import SafeImage from "@/components/SafeImage";
 import LoginGateCard from "@/components/LoginGateCard";
 import PleaseWaitScreen from "@/components/PleaseWaitScreen";
+import ComingSoonState from "@/components/ComingSoonState";
 import SmartVideoPlayer from "@/components/SmartVideoPlayer";
 import TelegramDeliveryCard from "@/components/TelegramDeliveryCard";
 import { formatBytesHuman } from "@/lib/clientDownloads";
@@ -93,9 +93,6 @@ export default function WatchLecturePage() {
   const [loading, setLoading] = useState(true);
   const [videoBuffering, setVideoBuffering] = useState(false);
   const [streamError, setStreamError] = useState("");
-  const [playerSource, setPlayerSource] = useState<"TELEGRAM" | "YOUTUBE">(
-    "TELEGRAM"
-  );
   const [playbackRate, setPlaybackRate] = useState(1);
   const [offlineUrl, setOfflineUrl] = useState<string | null>(null);
   const [streamModeInfo, setStreamModeInfo] = useState("");
@@ -149,11 +146,6 @@ export default function WatchLecturePage() {
       .then((res: WatchApiResponse) => {
         if (active && res?.ok) {
           setData(res);
-          if (res.telegramStreamUrl) {
-            setPlayerSource("TELEGRAM");
-          } else if (res.embedUrl) {
-            setPlayerSource("YOUTUBE");
-          }
         }
       })
       .catch(() => {})
@@ -342,14 +334,13 @@ export default function WatchLecturePage() {
     typeof window !== "undefined" &&
     window.innerHeight >= window.innerWidth;
 
-  const hasBothSources = Boolean(data?.telegramStreamUrl && data?.embedUrl);
-
   // 🤖 VIDEO AB TELEGRAM BOT SE AATI HAI (player ki jagah OPEN IN TELEGRAM).
-  // YouTube-only lectures website ke andar hi chalte rehte hain.
+  // 🚫 YouTube embed playback hata diya gaya hai — jis lecture me Telegram
+  //    video file nahi hai, wahan English me "content unavailable, will be
+  //    uploaded soon" card dikhta hai (iframe nahi chalta).
   const botDeliveryActive =
     data?.deliveryMode !== "in-app-player" &&
     Boolean(data?.telegramStreamUrl) &&
-    playerSource === "TELEGRAM" &&
     !forceBrowserPlayer;
 
   return (
@@ -440,7 +431,7 @@ export default function WatchLecturePage() {
                 fallbackStreamUrl={data?.telegramStreamUrl}
                 onUseFallback={() => setForceBrowserPlayer(true)}
               />
-            ) : playerSource === "TELEGRAM" && data?.telegramStreamUrl ? (
+            ) : data?.telegramStreamUrl ? (
               <>
                 <SmartVideoPlayer
                   primarySrc={data.telegramStreamUrl}
@@ -472,15 +463,11 @@ export default function WatchLecturePage() {
                   </div>
                 )}
               </>
-            ) : data?.embedUrl ? (
-              <iframe
-                src={data.embedUrl}
-                title={data.video?.title || "Lecture Video"}
-                className="h-full w-full border-0"
-                allow="accelerometer; autoplay; clipboard-write; encrypted-media; gyroscope; picture-in-picture; fullscreen"
-                allowFullScreen
-              />
             ) : (
+              /* ────────────────────────────────────────────────────────────
+                 🚫 NO TELEGRAM FILE → content unavailable (English only)
+                 Pehle yahan YouTube iframe chalta tha; ab nahi chalta.
+                 ──────────────────────────────────────────────────────────── */
               <div className="relative flex h-full w-full flex-col items-center justify-center overflow-hidden p-6 text-center">
                 <SafeImage
                   src={data?.video?.thumbnail}
@@ -488,15 +475,13 @@ export default function WatchLecturePage() {
                   alt={data?.video?.title || "Lecture"}
                   className="absolute inset-0 h-full w-full object-cover opacity-20"
                 />
-                <div className="relative z-10 max-w-md rounded-3xl border border-cyan-400/30 bg-[#090d24]/95 p-6">
-                  <Sparkles className="mx-auto mb-2.5 h-8 w-8 text-cyan-300" />
-                  <h2 className="text-lg font-black text-white">
-                    Video Link Pending
-                  </h2>
-                  <p className="mt-1.5 text-xs leading-relaxed text-slate-300">
-                    This lecture is not linked to a Telegram video or YouTube class
-                    yet. The admin will update it from the Admin Panel soon.
-                  </p>
+                <div className="relative z-10 w-full max-w-md px-2">
+                  <ComingSoonState
+                    accent="cyan"
+                    badge="CONTENT UNAVAILABLE"
+                    title="This Lecture Is Not Available Yet"
+                    subtitle="This content is unavailable right now. It will be uploaded soon — please check back later."
+                  />
                 </div>
               </div>
             )}
@@ -504,7 +489,7 @@ export default function WatchLecturePage() {
         </div>
 
         {/* Custom Speed & Skip Bar — sirf browser player mode me (bot mode me nahi) */}
-        {!botDeliveryActive && playerSource === "TELEGRAM" && data?.telegramStreamUrl && (
+        {!botDeliveryActive && data?.telegramStreamUrl && (
           <div className="px-4 pt-3 sm:px-0">
             <div className="flex flex-wrap items-center justify-between gap-2 rounded-2xl border border-cyan-400/20 bg-[#090d26] px-3.5 py-2.5">
               <div className="flex items-center gap-2">
@@ -536,19 +521,6 @@ export default function WatchLecturePage() {
                   <span>Speed: {playbackRate}x</span>
                 </button>
 
-                {hasBothSources && (
-                  <button
-                    type="button"
-                    onClick={() =>
-                      setPlayerSource((s) =>
-                        s === "TELEGRAM" ? "YOUTUBE" : "TELEGRAM"
-                      )
-                    }
-                    className="rounded-xl border border-amber-400/40 bg-amber-500/15 px-3 py-1.5 text-xs font-black text-amber-200"
-                  >
-                    Switch Server
-                  </button>
-                )}
               </div>
             </div>
           </div>

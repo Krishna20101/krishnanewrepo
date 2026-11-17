@@ -101,12 +101,20 @@ export async function POST(req: NextRequest) {
     const tgToken = String(located.video.tg_video_token || "");
     const youtubeUrl = String(located.video.youtube_url || "");
 
-    if (!tgToken && !youtubeUrl) {
+    // 🚫 YouTube-only lecture par bhi request nahi banti — bot sirf Telegram
+    //    file deliver kar sakta hai, aur website me YouTube embed playback ab
+    //    hai hi nahi. Dono case me user ko same English message milta hai.
+    if (!tgToken) {
       return NextResponse.json(
         {
           ok: false,
+          /**
+           * 🚫 YouTube embed playback hata diya gaya hai — jis lecture me
+           * Telegram video file nahi hai, user ko yahi English message dikhta
+           * hai (watch page par bhi same "content unavailable" card hai).
+           */
           error:
-            "This lecture has no Telegram video linked yet. Please ask the admin to sync it.",
+            "This content is unavailable right now. It will be uploaded soon — please check back later.",
           code: "NO_SOURCE",
         },
         { status: 409 }
