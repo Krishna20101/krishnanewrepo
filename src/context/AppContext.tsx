@@ -35,6 +35,8 @@ interface PublicConfig {
   appTagline: string;
   appDomain: string;
   telegramJoinUrl: string;
+  /** false = admin ne abhi real channel link set nahi kiya (CTA hide hota hai) */
+  telegramJoinUrlConfigured: boolean;
   telegramPopupEnabled: boolean;
   telegramPopupTitle: string;
   telegramPopupSubtitle: string;
@@ -44,6 +46,14 @@ interface PublicConfig {
   announcementText: string;
   announcementEnabled: boolean;
   allowVideoDownload: boolean;
+  /** "telegram-bot" = ▶ OPEN IN TELEGRAM | "in-app-player" = purana player */
+  videoDeliveryMode: "telegram-bot" | "in-app-player";
+  telegramBotUsername: string;
+  dailyVideoLimit: number;
+  autoDeleteHours: number;
+  creditUsername: string;
+  contactUsername: string;
+  botDeliveryPaused: boolean;
 }
 
 interface StartDownloadParams {
@@ -95,7 +105,9 @@ const DEFAULT_PUBLIC_CONFIG: PublicConfig = {
   appTagline: SITE_CONFIG.appTagline,
   appDomain: SITE_CONFIG.appDomain,
   telegramJoinUrl: SITE_CONFIG.telegramJoinUrl,
-  telegramPopupEnabled: true,
+  telegramJoinUrlConfigured: false,
+  // link configured na ho to popup khud band (server bhi false bhejta hai)
+  telegramPopupEnabled: false,
   telegramPopupTitle: SITE_CONFIG.telegramPopupTitle,
   telegramPopupSubtitle: SITE_CONFIG.telegramPopupSubtitle,
   telegramAutoCloseSeconds: SITE_CONFIG.telegramAutoCloseSeconds,
@@ -104,6 +116,13 @@ const DEFAULT_PUBLIC_CONFIG: PublicConfig = {
   announcementText: "",
   announcementEnabled: false,
   allowVideoDownload: true,
+  videoDeliveryMode: "telegram-bot",
+  telegramBotUsername: "",
+  dailyVideoLimit: 12,
+  autoDeleteHours: 2,
+  creditUsername: "krishna84",
+  contactUsername: "krishna84",
+  botDeliveryPaused: false,
 };
 
 const AppContext = createContext<AppContextValue | undefined>(undefined);

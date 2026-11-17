@@ -36,7 +36,7 @@ export default function LoginGateCard() {
     }
 
     if (result.isNewAccount) {
-      setNotice("Naya account ban gaya! Welcome 🎉");
+      setNotice("Your account has been created. Welcome! 🎉");
     }
 
     markLoggedIn();
@@ -138,9 +138,9 @@ export default function LoginGateCard() {
             <span>NEW HERE? FIRST LOGIN = AUTO SIGNUP</span>
           </div>
           <p className="mt-3 text-[10px] font-medium text-slate-500">
-            Koi bhi email / mobile number / user ID + password daaliye. Pehli baar
-            me account apne aap ban jayega — koi registration form bharne ki
-            zaroorat nahi.
+            Enter any email / mobile number / user ID with a password. Your
+            account is created automatically on the first login — no separate
+            registration form needed.
           </p>
         </div>
       </div>

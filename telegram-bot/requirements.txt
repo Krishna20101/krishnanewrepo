@@ -1,0 +1,29 @@
+# ============================================================================
+# 🤖 Study helper Doc — Telegram Delivery Bot
+# ----------------------------------------------------------------------------
+# Python 3.9+ (tested on 3.11 / 3.12). Install:
+#     python3 -m venv .venv
+#     source .venv/bin/activate          # Windows: .venv\Scripts\activate
+#     pip install -r requirements.txt
+# ============================================================================
+
+# Telegram user-session client (channel search + download + re-upload) -------
+Telethon==1.45.0
+
+# Telethon's AES + MTProto crypto backends -----------------------------------
+cryptography==50.0.2
+rsa==4.9.1
+pyaes==1.6.1
+
+# Firebase Realtime Database (the shared brain with the website) -------------
+firebase-admin==7.8.0
+requests==2.34.2
+
+# .env file loading ----------------------------------------------------------
+python-dotenv==1.2.4
+
+# ----------------------------------------------------------------------------
+# Optional speed-up: compiled AES for MTProto (safe to skip if it fails to
+# build on your host — pure-Python fallback above still works):
+#     pip install cryptg
+# ----------------------------------------------------------------------------

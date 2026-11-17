@@ -5,3 +5,14 @@ out
 .env.local
 data/local_store.json
 *.tsbuildinfo
+.venv-bot/
+*.session
+*.session-journal
+telegram-bot/bot_state.db
+telegram-bot/downloads/
+
+# ── Python bot build/runtime artifacts ───────────────────────────────────────
+__pycache__/
+*.py[cod]
+.venv/
+venv/

@@ -5,7 +5,7 @@ export default function GlobalRouteLoading() {
   return (
     <PleaseWaitScreen
       title="Please wait, loading..."
-      subtitle="Page open ho raha hai..."
+      subtitle="Please wait, opening the page…"
     />
   );
 }

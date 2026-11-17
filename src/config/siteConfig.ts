@@ -25,15 +25,31 @@ export const SITE_CONFIG = {
     process.env.NEXT_PUBLIC_APP_LOGO_URL ||
     "https://placehold.co/200x200/0d1230/00f0ff?text=SHD",
 
-  // Telegram Join Popup Defaults (Overridable via .env TELEGRAM_JOIN_URL or Admin Panel)
-  telegramJoinUrl:
-    process.env.NEXT_PUBLIC_TELEGRAM_URL ||
-    "https://t.me/YOUR_TELEGRAM_CHANNEL_HERE",
+  /**
+   * Telegram channel link (Overridable via .env TELEGRAM_JOIN_URL or Admin Panel).
+   * 🔧 FIX (v5): pehle yahan placeholder `https://t.me/YOUR_TELEGRAM_CHANNEL_HERE`
+   * tha — wo dead link user tak chala jata tha. Ab default KHALI hai; UI
+   * (`isTelegramJoinUrlConfigured`) empty/placeholder hone par CTA hi nahi
+   * dikhata, aur popup bhi nahi khulta jab tak admin real link set na kare.
+   */
+  telegramJoinUrl: process.env.NEXT_PUBLIC_TELEGRAM_URL || "",
   telegramPopupTitle: "Join Telegram for Daily Uploads!",
   telegramPopupSubtitle:
-    "Daily new lectures, class notes, aur instant batch updates sabse pehle pane ke liye abhi join karein.",
+    "Join now to get daily new lectures, class notes and instant batch updates first.",
   telegramAutoCloseSeconds: 5,
 };
+
+/**
+ * Telegram join link configured hai ya nahi — placeholder/dead links ko
+ * "configured" nahi maante.
+ */
+export function isTelegramJoinUrlConfigured(url?: string | null): boolean {
+  const value = String(url || "").trim();
+  if (!value) return false;
+  if (!/^https?:\/\//i.test(value)) return false;
+  if (/YOUR_TELEGRAM_CHANNEL_HERE|example\.com|placeholder/i.test(value)) return false;
+  return true;
+}
 
 export function apiUrl(path: string): string {
   const cleanPath = path.startsWith("/") ? path : `/${path}`;

@@ -298,7 +298,7 @@ function BatchExplorerInner() {
             accent="cyan"
             badge="IN PROGRESS • COMING SOON"
             title="Online Test Series — Coming Soon!"
-            subtitle="Chapter-wise MCQ Tests, Live Leaderboard aur Instant Score Analysis jaldi hi yahan live hoga!"
+            subtitle="Chapter-wise MCQ tests, live leaderboard and instant score analysis will go live here soon."
           />
         )}
 
@@ -307,7 +307,7 @@ function BatchExplorerInner() {
             accent="pink"
             badge="IN PROGRESS • COMING SOON"
             title="Live Interactive Classes — Coming Soon!"
-            subtitle="Real-time Live Stream aur Live Doubt Chat abhi setup ho raha hai. Recorded lectures SUBJECTS tab me dekhein!"
+            subtitle="Real-time live stream and live doubt chat are being set up. Recorded lectures are available in the SUBJECTS tab — watch them there."
           />
         )}
 
@@ -315,7 +315,7 @@ function BatchExplorerInner() {
         {loading && (!isRoot || rootTab === "SUBJECTS") && (
           <PleaseWaitScreen
             title="Please wait, loading folder..."
-            subtitle="Is folder ke subjects aur lectures load ho rahe hain..."
+            subtitle="Please wait, loading subjects and lectures of this folder…"
           />
         )}
 
@@ -447,8 +447,8 @@ function BatchExplorerInner() {
                   <>
                     {data.videos.length === 0 ? (
                       <div className="glass-card rounded-3xl border border-white/10 p-8 text-center text-sm font-semibold text-slate-400">
-                        Is folder me abhi koi video lecture nahi hai. PDF tab check
-                        karein!
+                        This folder has no video lecture yet. Please check the PDF
+                        tab.
                       </div>
                     ) : (
                       <div className="grid grid-cols-1 gap-5 md:grid-cols-2">

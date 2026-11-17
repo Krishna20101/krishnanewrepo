@@ -5,7 +5,7 @@ import { Loader2 } from "lucide-react";
 
 export default function PleaseWaitScreen({
   title = "Please wait, loading...",
-  subtitle = "Data taiyar ho raha hai, kripya thoda intezar karein",
+  subtitle = "Please wait, loading your content…",
   overlay = false,
 }: {
   title?: string;

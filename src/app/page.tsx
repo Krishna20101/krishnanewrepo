@@ -60,7 +60,7 @@ export default function HomePage() {
     return (
       <PleaseWaitScreen
         title="Please wait, loading..."
-        subtitle="Study helper Doc start ho raha hai..."
+        subtitle="Please wait, starting Study helper Doc…"
       />
     );
   }
@@ -95,15 +95,19 @@ export default function HomePage() {
           </div>
 
           <div className="flex items-center gap-2">
-            <a
-              href={config.telegramJoinUrl}
-              target="_blank"
-              rel="noopener noreferrer"
-              title="Join Telegram"
-              className="flex h-9 w-9 items-center justify-center rounded-xl border border-cyan-400/35 bg-cyan-500/10 text-cyan-300 transition hover:border-cyan-300 hover:bg-cyan-500/20"
-            >
-              <Send className="h-4 w-4" />
-            </a>
+            {/* 🔧 FIX (v5): dead placeholder link ab render hi nahi hota —
+                sirf admin ke real channel link par dikhta hai. */}
+            {config.telegramJoinUrlConfigured ? (
+              <a
+                href={config.telegramJoinUrl}
+                target="_blank"
+                rel="noopener noreferrer"
+                title="Join Telegram"
+                className="flex h-9 w-9 items-center justify-center rounded-xl border border-cyan-400/35 bg-cyan-500/10 text-cyan-300 transition hover:border-cyan-300 hover:bg-cyan-500/20"
+              >
+                <Send className="h-4 w-4" />
+              </a>
+            ) : null}
             <button
               type="button"
               onClick={logoutStudent}
@@ -160,16 +164,16 @@ export default function HomePage() {
         {loading ? (
           <PleaseWaitScreen
             title="Please wait, loading courses..."
-            subtitle="Sabhi batches load ho rahe hain..."
+            subtitle="Please wait, loading all courses…"
           />
         ) : filteredBatches.length === 0 ? (
           <div className="glass-card mx-auto my-12 max-w-md rounded-3xl border border-white/10 p-8 text-center">
             <p className="text-lg font-extrabold text-white">
-              Koi matching batch nahi mila
+              No matching course found
             </p>
             <p className="mt-1.5 text-sm text-slate-400">
-              Search keyword change karein ya sabhi batches dekhne ke liye clear
-              karein.
+              Try a different search keyword, or clear the search to see all
+              courses.
             </p>
           </div>
         ) : (

@@ -48,8 +48,8 @@ export default function ComingSoonModal() {
         </p>
 
         <p className="mt-2.5 text-sm leading-relaxed text-slate-300">
-          PDF Reader & High-Speed Notes Viewer abhi upgrade ho raha hai. Bahut
-          jald yahan saare PDF notes direct open honge!
+          The PDF reader and high-speed notes viewer are being upgraded. All PDF
+          notes will open directly here very soon.
         </p>
 
         <button

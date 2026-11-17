@@ -378,7 +378,12 @@ export function formatBatchSummary(
     thumbnail,
     rawPrice,
     displayPrice,
-    isFreeTag: true,
+    /**
+     * 🔧 FIX (v5): pehle ye hardcoded `true` tha — ₹999 price wale batch ka
+     * data-level free flag bhi true aata tha. UI me FREE badge waise bhi alag
+     * se hardcoded hai, isliye visual change nahi; sirf data ab honest hai.
+     */
+    isFreeTag: !hasPositivePrice || rawPrice.toLowerCase() === "free",
     hidden: Boolean(batch.hidden),
     important: Boolean(batch.important),
     sortOrder: typeof batch.sort_order === "number" ? batch.sort_order : 9999,

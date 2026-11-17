@@ -64,7 +64,7 @@ export default function WishlistPage() {
         {loading ? (
           <PleaseWaitScreen
             title="Please wait, loading wishlist..."
-            subtitle="Saved batches load ho rahe hain..."
+            subtitle="Please wait, loading your saved courses…"
           />
         ) : savedBatches.length === 0 ? (
           <div className="glass-card mx-auto my-12 max-w-md rounded-3xl border border-rose-400/25 p-8 text-center">
@@ -72,11 +72,11 @@ export default function WishlistPage() {
               <Heart className="h-8 w-8 text-rose-400" />
             </div>
             <h2 className="text-xl font-black text-white">
-              Wishlist Abhi Khali Hai
+              Your Wishlist Is Empty
             </h2>
             <p className="mt-2 text-sm text-slate-300">
-              Home page par kisi bhi batch ke upar ❤️ heart icon dabayein taki
-              apne favourite batches yahan quick-open kar sakein!
+              Tap the ❤️ heart icon on any course on the home page to save your
+              favourite courses here for quick access.
             </p>
             <Link
               href="/"

@@ -1,4 +1,8 @@
 import { NextRequest, NextResponse } from "next/server";
+import { SITE_CONFIG } from "@/config/siteConfig";
+import { isContentRequestAuthorized } from "@/lib/studentAuth";
+import { getEffectiveSiteSettings } from "@/lib/db";
+import { isAllowedStreamRequest, streamCorsHeaders } from "@/lib/httpGuards";
 import { verifyTelegramMediaToken } from "@/lib/tgCrypto";
 import {
   createTelegramByteRangeStream,
@@ -10,53 +14,73 @@ export const dynamic = "force-dynamic";
 export const runtime = "nodejs";
 export const maxDuration = 300; // Vercel Hobby max streaming duration (300s per stream connection)
 
-const CORS_HEADERS: Record<string, string> = {
-  "Access-Control-Allow-Origin": "*",
-  "Access-Control-Allow-Methods": "GET, HEAD, OPTIONS",
-  "Access-Control-Allow-Headers":
-    "Range, Content-Type, X-SHD-Client, X-SHD-Worker-Proxy",
-  "Access-Control-Expose-Headers":
-    "Content-Range, Accept-Ranges, Content-Length, Content-Type, X-SHD-Total-Size, X-SHD-File-Name, X-SHD-Mime-Type, X-SHD-Engine",
-};
+// ============================================================================
+// 🎬 TELEGRAM MEDIA STREAM  (video + PDF) — HTTP 206 byte-range
+// ----------------------------------------------------------------------------
+// 🔒 v5 hardening:
+//   • hotlink guard ab DEFAULT-DENY hai (pehle sirf `Range:` header bhej kar
+//     koi bhi direct stream nikal sakta tha)
+//   • Cloudflare Worker proxy shared secret (`X-Worker-Secret`) se verify hota
+//     hai — admin panel → Website Settings se secret copy karke worker.js me
+//     paste karein aur "Require worker secret" ON kar dein
+//   • wildcard CORS hata diya — sirf allowlisted origin reflect hota hai
+//
+// 🤖 NOTE: v5 se VIDEO delivery default roop se Telegram bot se hoti hai
+//   (watch page par ▶ OPEN IN TELEGRAM). Ye route ab mainly PDF + thumbnails +
+//   optional in-app player fallback ke liye hai.
+// ============================================================================
 
-function isAllowedStreamRequest(req: NextRequest): boolean {
-  if (req.headers.get("x-shd-worker-proxy") === "1") return true;
-  if (req.headers.get("x-shd-client") === "web-player") return true;
+async function guard(req: NextRequest): Promise<{
+  allowed: boolean;
+  cors: Record<string, string>;
+}> {
+  const settings = await getEffectiveSiteSettings().catch(() => null);
+  const allowedOrigins = [
+    settings?.cloudflareStreamWorkerUrl || "",
+    SITE_CONFIG.appDomain || "",
+    process.env.NEXT_PUBLIC_SITE_URL || "",
+  ].filter(Boolean);
 
-  const dest = req.headers.get("sec-fetch-dest") || "";
-  if (dest === "video" || dest === "audio" || dest === "empty") return true;
+  const cors = streamCorsHeaders(req, allowedOrigins);
+  const allowed = isAllowedStreamRequest(req, {
+    hasSession: isContentRequestAuthorized(req),
+    options: {
+      requireWorkerSecret: Boolean(settings?.requireWorkerSecret),
+      allowedOrigins,
+    },
+  });
 
-  const range = req.headers.get("range");
-  if (range && range.startsWith("bytes=")) return true;
-
-  const referer = req.headers.get("referer") || "";
-  const host = req.headers.get("host") || "";
-  if (dest === "document" && (!referer || !referer.includes(host))) {
-    return false;
-  }
-
-  return true;
+  return { allowed, cors };
 }
 
-export async function OPTIONS() {
-  return new NextResponse(null, {
-    status: 204,
-    headers: CORS_HEADERS,
-  });
+function deniedResponse(cors: Record<string, string>): Response {
+  return NextResponse.json(
+    {
+      ok: false,
+      error:
+        "Direct external link access is disabled. Please open the lecture inside the website.",
+    },
+    { status: 403, headers: cors }
+  );
+}
+
+export async function OPTIONS(req: NextRequest) {
+  const { cors } = await guard(req);
+  return new NextResponse(null, { status: 204, headers: cors });
 }
 
 export async function HEAD(
   req: NextRequest,
   { params }: { params: { token: string } }
 ) {
+  const { allowed, cors } = await guard(req);
   try {
-    if (!isAllowedStreamRequest(req)) {
-      return new NextResponse(null, { status: 403, headers: CORS_HEADERS });
-    }
+    if (!allowed) return new NextResponse(null, { status: 403, headers: cors });
+
     const rawToken = decodeURIComponent(params.token || "");
     const decoded = verifyTelegramMediaToken(rawToken);
     if (!decoded) {
-      return new NextResponse(null, { status: 403, headers: CORS_HEADERS });
+      return new NextResponse(null, { status: 403, headers: cors });
     }
 
     const meta = await resolveTelegramMediaMeta({
@@ -75,7 +99,7 @@ export async function HEAD(
     return new NextResponse(null, {
       status: 200,
       headers: {
-        ...CORS_HEADERS,
+        ...cors,
         "Content-Type": contentType,
         "Accept-Ranges": "bytes",
         "Content-Length": String(meta.totalSize),
@@ -87,7 +111,7 @@ export async function HEAD(
       },
     });
   } catch {
-    return new NextResponse(null, { status: 500, headers: CORS_HEADERS });
+    return new NextResponse(null, { status: 500, headers: cors });
   }
 }
 
@@ -95,24 +119,17 @@ export async function GET(
   req: NextRequest,
   { params }: { params: { token: string } }
 ) {
+  const { allowed, cors } = await guard(req);
+
   try {
-    if (!isAllowedStreamRequest(req)) {
-      return NextResponse.json(
-        {
-          ok: false,
-          error:
-            "Direct external link access is disabled. Please watch inside Study helper Doc.",
-        },
-        { status: 403, headers: CORS_HEADERS }
-      );
-    }
+    if (!allowed) return deniedResponse(cors);
 
     const rawToken = decodeURIComponent(params.token || "");
     const decoded = verifyTelegramMediaToken(rawToken);
     if (!decoded) {
       return NextResponse.json(
         { ok: false, error: "Invalid or expired media stream token." },
-        { status: 403, headers: CORS_HEADERS }
+        { status: 403, headers: cors }
       );
     }
 
@@ -144,7 +161,7 @@ export async function GET(
         return new Response(null, {
           status: 416,
           headers: {
-            ...CORS_HEADERS,
+            ...cors,
             "Content-Range": `bytes */${totalSize}`,
           },
         });
@@ -158,12 +175,11 @@ export async function GET(
       }
       // IMPORTANT: When `<video>` sends open-ended `Range: bytes=0-` (empty endStr),
       // `endByte` stays `totalSize - 1` and streams continuously via ReadableStream!
-      // This completely eliminates 2MB EOF cutoffs, H.264 GOP glitches, and repeated frames!
     }
 
-    // 32 MB per-response cap: keeps every Vercel invocation short & memory-safe
-    // (Hobby functions hard-stop around 60s). Chrome automatically asks for the
-    // next 32 MB slice, so playback stays 100% continuous & smooth.
+    // 32 MB per-response cap: keeps every Vercel invocation short & memory-safe.
+    // Chrome automatically asks for the next 32 MB slice, so playback stays
+    // continuous (aur in-app player fallback bhi smooth rehta hai).
     const cappedEnd = startByte + MAX_STREAM_RESPONSE_BYTES - 1;
     if (endByte > cappedEnd) {
       endByte = Math.min(cappedEnd, totalSize - 1);
@@ -187,7 +203,7 @@ export async function GET(
     });
 
     const headers: Record<string, string> = {
-      ...CORS_HEADERS,
+      ...cors,
       "Content-Type": contentType,
       "Accept-Ranges": "bytes",
       "Content-Length": String(contentLength),
@@ -195,10 +211,9 @@ export async function GET(
       "X-SHD-File-Name": safeDisplayName,
       "X-SHD-Mime-Type": contentType,
       "X-SHD-Engine": meta.viaBot ? "telegram-bot" : "telegram-user",
-      "Cache-Control":
-        req.headers.get("x-shd-worker-proxy") === "1"
-          ? "public, max-age=604800"
-          : "no-transform",
+      "Cache-Control": isTrustedWorkerRequest(req)
+        ? "public, max-age=604800"
+        : "no-transform",
     };
 
     if (hasRange) {
@@ -211,9 +226,10 @@ export async function GET(
     });
   } catch (err) {
     const msg = err instanceof Error ? err.message : "Stream failed";
-    return NextResponse.json(
-      { ok: false, error: msg },
-      { status: 500, headers: CORS_HEADERS }
-    );
+    return NextResponse.json({ ok: false, error: msg }, { status: 500, headers: cors });
   }
+}
+
+function isTrustedWorkerRequest(req: NextRequest): boolean {
+  return req.headers.get("x-shd-worker-proxy") === "1";
 }

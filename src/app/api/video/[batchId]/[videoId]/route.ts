@@ -1,5 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
+import { getBotConfig } from "@/lib/botDelivery";
 import { isContentRequestAuthorized } from "@/lib/studentAuth";
+import { buildTopicPath } from "@/lib/tgMatch";
 import {
   findVideoInBatch,
   getEffectiveRootNodes,
@@ -27,10 +29,11 @@ export async function GET(
     const batchId = decodeURIComponent(params.batchId);
     const videoId = decodeURIComponent(params.videoId);
 
-    const [rawBatch, savedEmbed, settings] = await Promise.all([
+    const [rawBatch, savedEmbed, settings, botConfig] = await Promise.all([
       loadSingleRawBatch(batchId, { includeHidden: false }),
       getVideoEmbed(batchId, videoId),
       getEffectiveSiteSettings(),
+      getBotConfig().catch(() => null),
     ]);
 
     if (!rawBatch) {
@@ -101,12 +104,37 @@ export async function GET(
       .slice(sliceStart, sliceStart + 30)
       .map((s) => toCleanNodeItem(s, undefined, batchId));
 
+    const batchName = String(rawBatch.name || rawBatch.title || "Course");
+    const deliveryMode =
+      settings.videoDeliveryMode === "in-app-player" ? "in-app-player" : "telegram-bot";
+
     return NextResponse.json({
       ok: true,
       batch: {
         id: String(rawBatch.id || batchId),
-        name: String(rawBatch.name || rawBatch.title || "Course"),
+        name: batchName,
         thumbnail: String(rawBatch.thumbnail || "").trim(),
+      },
+      // 🤖 Telegram bot delivery (watch page isi se ▶ OPEN IN TELEGRAM dikhata hai)
+      courseName: batchName,
+      topic: buildTopicPath(
+        Array.isArray(located.folderPath) ? located.folderPath : [],
+        String(located.folderTitle || "")
+      ),
+      deliveryMode,
+      bot: {
+        username: String(botConfig?.botUsername || settings.telegramBotUsername || "").replace(
+          /^@+/,
+          ""
+        ),
+        dailyLimit: Number(botConfig?.dailyLimit || settings.dailyVideoLimit || 12),
+        autoDeleteHours: Number(botConfig?.autoDeleteHours || settings.autoDeleteHours || 2),
+        creditUsername: String(botConfig?.creditUsername || settings.creditUsername || "krishna84"),
+        contactUsername: String(
+          botConfig?.contactUsername || settings.contactUsername || "krishna84"
+        ),
+        paused: Boolean(botConfig?.paused),
+        deliveryMode: String(botConfig?.deliveryMode || "clean"),
       },
       video: cleanVideo,
       folderTitle: located.folderTitle,

@@ -24,6 +24,7 @@ import SafeImage from "@/components/SafeImage";
 import LoginGateCard from "@/components/LoginGateCard";
 import PleaseWaitScreen from "@/components/PleaseWaitScreen";
 import SmartVideoPlayer from "@/components/SmartVideoPlayer";
+import TelegramDeliveryCard from "@/components/TelegramDeliveryCard";
 import { formatBytesHuman } from "@/lib/clientDownloads";
 import { apiUrl } from "@/config/siteConfig";
 
@@ -52,6 +53,19 @@ interface WatchApiResponse {
   fileSize?: number;
   allowVideoDownload?: boolean;
   siblings: SiblingVideo[];
+  /** 🤖 Telegram bot delivery (v5) */
+  courseName?: string;
+  topic?: string;
+  deliveryMode?: "telegram-bot" | "in-app-player";
+  bot?: {
+    username: string;
+    dailyLimit: number;
+    autoDeleteHours: number;
+    creditUsername: string;
+    contactUsername: string;
+    paused: boolean;
+    deliveryMode: string;
+  };
 }
 
 const SPEED_OPTIONS = [0.75, 1, 1.25, 1.5, 1.75, 2];
@@ -87,6 +101,12 @@ export default function WatchLecturePage() {
   const [streamModeInfo, setStreamModeInfo] = useState("");
   const [isRotatedLandscape, setIsRotatedLandscape] = useState(false);
   const [copied, setCopied] = useState(false);
+  /**
+   * Bot delivery default hai. Agar student explicitly "Play in browser"
+   * fallback dabaye (ya admin ne in-app-player mode set kiya ho) to purana
+   * SmartVideoPlayer chal jata hai.
+   */
+  const [forceBrowserPlayer, setForceBrowserPlayer] = useState(false);
 
   const playerShellRef = useRef<HTMLDivElement | null>(null);
   const videoRef = useRef<HTMLVideoElement | null>(null);
@@ -324,6 +344,14 @@ export default function WatchLecturePage() {
 
   const hasBothSources = Boolean(data?.telegramStreamUrl && data?.embedUrl);
 
+  // 🤖 VIDEO AB TELEGRAM BOT SE AATI HAI (player ki jagah OPEN IN TELEGRAM).
+  // YouTube-only lectures website ke andar hi chalte rehte hain.
+  const botDeliveryActive =
+    data?.deliveryMode !== "in-app-player" &&
+    Boolean(data?.telegramStreamUrl) &&
+    playerSource === "TELEGRAM" &&
+    !forceBrowserPlayer;
+
   return (
     <div
       className="mx-auto min-h-screen max-w-5xl bg-[#04050e] pb-16 select-none"
@@ -390,9 +418,28 @@ export default function WatchLecturePage() {
               <div className="flex h-full w-full flex-col items-center justify-center gap-3">
                 <Loader2 className="h-10 w-10 animate-spin text-cyan-300" />
                 <p className="text-xs font-black uppercase tracking-widest text-cyan-300">
-                  Please wait, loading video stream...
+                  Please wait, loading your lecture…
                 </p>
               </div>
+            ) : botDeliveryActive ? (
+              <TelegramDeliveryCard
+                batchId={batchId}
+                videoId={videoId}
+                title={data?.video?.title || "Lecture"}
+                topic={data?.topic || data?.folderTitle || ""}
+                courseName={data?.courseName || data?.batch?.name || ""}
+                thumbnail={data?.video?.thumbnail}
+                defaultImage={config.defaultImageUrl}
+                fileSize={data?.fileSize}
+                botUsername={data?.bot?.username || config.telegramBotUsername}
+                dailyLimit={data?.bot?.dailyLimit ?? config.dailyVideoLimit}
+                autoDeleteHours={data?.bot?.autoDeleteHours ?? config.autoDeleteHours}
+                creditUsername={data?.bot?.creditUsername || config.creditUsername}
+                contactUsername={data?.bot?.contactUsername || config.contactUsername}
+                paused={Boolean(data?.bot?.paused || config.botDeliveryPaused)}
+                fallbackStreamUrl={data?.telegramStreamUrl}
+                onUseFallback={() => setForceBrowserPlayer(true)}
+              />
             ) : playerSource === "TELEGRAM" && data?.telegramStreamUrl ? (
               <>
                 <SmartVideoPlayer
@@ -406,7 +453,7 @@ export default function WatchLecturePage() {
                   onModeChange={(m, info) =>
                     setStreamModeInfo(
                       m === "offline"
-                        ? "OFFLINE — phone se chal raha hai (0% internet)"
+                        ? "OFFLINE — playing from your device (0% internet)"
                         : info
                         ? `${m.toUpperCase()} — ${info}`
                         : m.toUpperCase()
@@ -444,11 +491,11 @@ export default function WatchLecturePage() {
                 <div className="relative z-10 max-w-md rounded-3xl border border-cyan-400/30 bg-[#090d24]/95 p-6">
                   <Sparkles className="mx-auto mb-2.5 h-8 w-8 text-cyan-300" />
                   <h2 className="text-lg font-black text-white">
-                    Video Stream Link Pending
+                    Video Link Pending
                   </h2>
                   <p className="mt-1.5 text-xs leading-relaxed text-slate-300">
-                    Is lecture ka Telegram ya YouTube stream link Admin Panel se
-                    jald hi update kiya jayega. Stay tuned!
+                    This lecture is not linked to a Telegram video or YouTube class
+                    yet. The admin will update it from the Admin Panel soon.
                   </p>
                 </div>
               </div>
@@ -456,8 +503,8 @@ export default function WatchLecturePage() {
           </div>
         </div>
 
-        {/* Custom Speed & Skip Bar when playing Protected Telegram Stream */}
-        {playerSource === "TELEGRAM" && data?.telegramStreamUrl && (
+        {/* Custom Speed & Skip Bar — sirf browser player mode me (bot mode me nahi) */}
+        {!botDeliveryActive && playerSource === "TELEGRAM" && data?.telegramStreamUrl && (
           <div className="px-4 pt-3 sm:px-0">
             <div className="flex flex-wrap items-center justify-between gap-2 rounded-2xl border border-cyan-400/20 bg-[#090d26] px-3.5 py-2.5">
               <div className="flex items-center gap-2">
@@ -540,8 +587,11 @@ export default function WatchLecturePage() {
                 </span>
               </button>
 
-              {/* 📥 In-App Offline Vault Save (file phone me NAHI jati) */}
-              {data?.telegramStreamUrl && data.allowVideoDownload !== false && (
+              {/* 📥 In-App Offline Vault Save — sirf browser-player mode me.
+                  Bot delivery me video Telegram par hi milti hai (2h auto-delete). */}
+              {!botDeliveryActive &&
+                data?.telegramStreamUrl &&
+                data.allowVideoDownload !== false && (
                 <div className="flex flex-wrap items-center gap-2">
                   <button
                     type="button"
@@ -613,8 +663,8 @@ export default function WatchLecturePage() {
             <div className="mt-3 rounded-2xl border border-emerald-400/35 bg-emerald-500/10 p-3">
               <div className="flex items-center justify-between text-xs font-bold text-emerald-200">
                 <span>
-                  Please wait, lecture phone ke andar save ho raha hai (
-                  {currentDownload.progressPct}%) — internet ke bina chalega...
+                  Please wait, saving this lecture inside the app (
+                  {currentDownload.progressPct}%) — it will play without internet…
                 </span>
                 <span>
                   {formatBytesHuman(currentDownload.downloadedBytes)} /{" "}

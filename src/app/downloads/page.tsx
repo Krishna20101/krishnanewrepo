@@ -158,7 +158,7 @@ export default function DownloadsPage() {
               DOWNLOADS ({downloadsList.length})
             </h1>
             <p className="text-xs font-medium text-slate-400">
-              Aapke downloaded Lectures aur PDF Notes yahan rehte hain.
+              Your saved lectures and PDF notes live here.
             </p>
           </div>
         </div>
@@ -220,9 +220,8 @@ export default function DownloadsPage() {
             </div>
           )}
           <p className="mt-2 text-[10px] leading-relaxed text-slate-400">
-            Saved lectures sirf isi website ke andar rehte hain (phone ke
-            Downloads folder me file nahi jati) — internet band ho tab bhi
-            chalega.
+            Saved lectures stay inside this website only (no file goes to your
+            phone Downloads folder) — they keep playing even without internet.
           </p>
         </div>
 

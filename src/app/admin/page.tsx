@@ -1,9 +1,11 @@
 "use client";
 
 import React, { useCallback, useEffect, useMemo, useState } from "react";
+import TelegramBotPanel from "@/components/admin/TelegramBotPanel";
 import {
   ArrowDown,
   ArrowUp,
+  Bot,
   CheckCircle2,
   ChevronRight,
   ChevronsDown,
@@ -148,6 +150,7 @@ type AdminTab =
   | "OVERVIEW"
   | "EXPLORER"
   | "TELEGRAM"
+  | "BOT"
   | "COURSES"
   | "SETTINGS"
   | "ACCOUNTS"
@@ -1471,6 +1474,11 @@ export default function AdminDashboardPage() {
               id: "TELEGRAM",
               label: "Telegram Sync Studio",
               icon: Send,
+            },
+            {
+              id: "BOT",
+              label: "Telegram Bot Delivery",
+              icon: Bot,
             },
             {
               id: "COURSES",
@@ -3001,6 +3009,13 @@ export default function AdminDashboardPage() {
         {/* ====================================================================
             TAB 4: WEBSITE CONTROLS & .ENV SECURITY GUIDE
            ==================================================================== */}
+        {/* ====================================================================
+            TAB: 🤖 TELEGRAM BOT DELIVERY (v5)
+            Watch page ab video Telegram bot se bhejta hai — in-app chunked
+            streaming (jhal-jhal / 1-2s jump) ki jagah.
+           ==================================================================== */}
+        {activeTab === "BOT" && <TelegramBotPanel />}
+
         {activeTab === "SETTINGS" && (
           <div className="grid grid-cols-1 gap-6 lg:grid-cols-12">
             <form

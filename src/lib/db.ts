@@ -59,6 +59,8 @@ export interface VideoEmbedEntry {
   updatedAt: string;
 }
 
+export type VideoDeliveryMode = "telegram-bot" | "in-app-player";
+
 export interface SiteDynamicSettings {
   telegramJoinUrl: string;
   telegramPopupEnabled: boolean;
@@ -72,6 +74,31 @@ export interface SiteDynamicSettings {
   announcementEnabled: boolean;
   cloudflareStreamWorkerUrl: string;
   allowVideoDownload: boolean;
+
+  // ── 🤖 TELEGRAM BOT DELIVERY (v5) ────────────────────────────────────────
+  /**
+   * "telegram-bot"  → watch page par video player ki jagah ▶ OPEN IN TELEGRAM
+   *                   button (bot video download karke user ko Telegram par
+   *                   bhejta hai = 0% jhal-jhal / frame-jump problem).
+   * "in-app-player" → purana in-app streaming player (fallback / testing).
+   */
+  videoDeliveryMode: VideoDeliveryMode;
+  /** @BotFather wala bot username (deep-link ke liye). Bot khud bhi publish karta hai. */
+  telegramBotUsername: string;
+  /** Per-user daily video limit (24h rolling window) */
+  dailyVideoLimit: number;
+  /** Delivered video kitne ghante baad auto-delete ho */
+  autoDeleteHours: number;
+  /** Delivery caption ka credit: "Extracted By @<creditUsername>" */
+  creditUsername: string;
+  /** Limit khatam hone par dikhne wala contact handle */
+  contactUsername: string;
+  /**
+   * 🔒 Cloudflare Worker proxy par shared secret (`X-Worker-Secret`) zaroori
+   * karein. Naya worker.js paste karne ke BAAD hi ON karein (warna purana
+   * worker 403 khane lagega).
+   */
+  requireWorkerSecret: boolean;
 }
 
 export interface BatchOrderMeta {
@@ -134,6 +161,12 @@ interface LocalStoreSchema {
   deleted_batch_ids: string[];
   telegram_encrypted_creds?: string;
   telegram_groups?: Record<string, SyncedTelegramGroupRecord>;
+  /**
+   * Firebase RTDB na ho (local-fallback) to generic path-based data yahan
+   * rehta hai — `rtStore.ts` isko `{ "bot_state/config": {...} }` ki tarah
+   * use karta hai. Sirf local dev ke liye (Vercel par persist nahi hota).
+   */
+  local_paths?: Record<string, unknown>;
 }
 
 // ============================================================================
@@ -164,7 +197,8 @@ export function invalidateServerCaches(): void {
   memCache.clear();
 }
 
-function safeRtdbKey(rawKey: string): string {
+/** @internal */
+export function safeRtdbKey(rawKey: string): string {
   return String(rawKey).replace(/[.#$[\]/]/g, "_");
 }
 
@@ -174,7 +208,8 @@ export function getLastDbError(): string | null {
   return lastDbError;
 }
 
-function getAdminRtdb() {
+/** @internal — sibling server modules (rtStore.ts) ke liye export */
+export function getAdminRtdb() {
   if (getFirebaseMode() !== "admin-rtdb") return null;
   const cfg = getParsedFirebaseAdminConfig();
   if (!cfg.databaseURL) return null;
@@ -198,7 +233,8 @@ function getAdminRtdb() {
   }
 }
 
-function getServerWebRtdb() {
+/** @internal */
+export function getServerWebRtdb() {
   if (getFirebaseMode() !== "web-rtdb") return null;
   try {
     const app = getWebApps().length
@@ -216,7 +252,8 @@ function getServerWebRtdb() {
   }
 }
 
-async function withTimeout<T>(promise: Promise<T>, ms = 6000): Promise<T> {
+/** @internal */
+export async function withTimeout<T>(promise: Promise<T>, ms = 6000): Promise<T> {
   return new Promise<T>((resolve, reject) => {
     const timer = setTimeout(
       () =>
@@ -242,46 +279,25 @@ async function withTimeout<T>(promise: Promise<T>, ms = 6000): Promise<T> {
 const LOCAL_STORE_PATH = path.join(process.cwd(), "data", "local_store.json");
 const TMP_STORE_PATH = "/tmp/shd_local_store.json";
 
+/**
+ * 🔥 TRIAL / FAKE SEED DATA REMOVED (v5)
+ * ---------------------------------------------------------------------------
+ * Pehle yahan 3 hardcoded "demo" YouTube embeds seed hote the (batchId 65/57
+ * ke fake video ids: "Spoken English Batch Launching", "Physics Syllabus..."
+ * with youtube.com/watch?v=M7lc1UVf-VE). Wo admin panel + course tree me
+ * NAKLI lectures dikha dete the.
+ *
+ * Ab course data SIRF real sources se aata hai:
+ *   • data/batches/*.json    (aapke upload kiye hue real JSON — untouched)
+ *   • /admin → Telegram Sync Studio  (live sync)
+ *   • /admin → Explorer      (manual YouTube / PDF add)
+ */
 function getInitialSeedEmbeds(): Record<string, VideoEmbedEntry> {
-  const seeds = [
-    {
-      batchId: "65",
-      videoId: "131722",
-      title: "Spoken English Batch Launching",
-      rawUrl: "https://www.youtube.com/watch?v=M7lc1UVf-VE",
-    },
-    {
-      batchId: "65",
-      videoId: "131790",
-      title: "Spoken English Part-1",
-      rawUrl: "https://www.youtube.com/watch?v=ysz5S6PUM-U",
-    },
-    {
-      batchId: "57",
-      videoId: "109601",
-      title: "Physics Syllabus 2026-27 Bihar Board",
-      rawUrl: "https://www.youtube.com/watch?v=M7lc1UVf-VE",
-    },
-  ];
-  const map: Record<string, VideoEmbedEntry> = {};
-  for (const s of seeds) {
-    const parsed = buildYoutubeEmbedUrl(s.rawUrl);
-    const key = `${s.batchId}_${s.videoId}`;
-    map[key] = {
-      key,
-      batchId: s.batchId,
-      videoId: s.videoId,
-      title: s.title,
-      rawUrl: s.rawUrl,
-      embedUrl: parsed.embedUrl,
-      youtubeId: parsed.youtubeId,
-      updatedAt: new Date().toISOString(),
-    };
-  }
-  return map;
+  return {};
 }
 
-function readLocalStore(): LocalStoreSchema {
+/** @internal */
+export function readLocalStore(): LocalStoreSchema {
   const defaultStore: LocalStoreSchema = {
     user_logins: [],
     student_accounts: {},
@@ -308,7 +324,8 @@ function readLocalStore(): LocalStoreSchema {
   return defaultStore;
 }
 
-function writeLocalStore(store: LocalStoreSchema): void {
+/** @internal */
+export function writeLocalStore(store: LocalStoreSchema): void {
   const payload = JSON.stringify(store, null, 2);
   try {
     fs.mkdirSync(path.dirname(LOCAL_STORE_PATH), { recursive: true });
@@ -855,6 +872,14 @@ export async function getEffectiveSiteSettings(): Promise<SiteDynamicSettings> {
       process.env.CLOUDFLARE_STREAM_WORKER_URL
     ),
     allowVideoDownload: true,
+    // 🤖 Telegram Bot Delivery defaults
+    videoDeliveryMode: "telegram-bot",
+    telegramBotUsername: cleanEnv(process.env.TELEGRAM_BOT_USERNAME),
+    dailyVideoLimit: 12,
+    autoDeleteHours: 2,
+    creditUsername: cleanEnv(process.env.TELEGRAM_CREDIT_USERNAME) || "krishna84",
+    contactUsername: cleanEnv(process.env.TELEGRAM_CONTACT_USERNAME) || "krishna84",
+    requireWorkerSecret: false,
   };
 
   const rtdb = getAdminRtdb();

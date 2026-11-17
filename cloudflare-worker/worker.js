@@ -45,6 +45,26 @@
 const ORIGIN_SITE_URL = "https://studyhelperdoc.vercel.app";
 const ALLOWED_ORIGIN_KEYWORD = "studyhelperdoc"; // preview domains allow karne ke liye "" kar dein
 
+/**
+ * 🔒 WORKER SHARED SECRET (v5 — recommended)
+ * Origin (Vercel) ab `X-SHD-Worker-Proxy: 1` header par blindly bharosa nahi
+ * karta. Ye secret `/admin → Telegram Bot Delivery → Cloudflare Worker Secret`
+ * se copy karke yahan paste karein, phir admin panel me
+ * "Require worker secret" ON kar dein. Khali chhodne par bhi chal jayega
+ * (backwards compatible), par tab koi bhi proxy header spoof kar sakta hai.
+ */
+const WORKER_SHARED_SECRET = "";
+
+/** Upstream (Vercel) par bhejne wale headers — ek hi jagah se. */
+function upstreamHeaders(extra) {
+  const headers = {
+    "X-SHD-Worker-Proxy": "1",
+    ...(extra || {}),
+  };
+  if (WORKER_SHARED_SECRET) headers["X-Worker-Secret"] = WORKER_SHARED_SECRET;
+  return headers;
+}
+
 const EDGE_BLOCK_BYTES = 2 * 1024 * 1024; // 2 MB aligned Edge-Cache blocks
 const MAX_RESPONSE_BYTES = 16 * 1024 * 1024; // 16 MB per 206 response (8 blocks)
 const BLOCK_RETRY = 2;
@@ -112,11 +132,7 @@ async function fetchOrCacheAlignedBlock(
     try {
       const upstreamRes = await fetch(upstreamBaseUrl, {
         method: "GET",
-        headers: {
-          Range: `bytes=${blockStart}-${blockEnd}`,
-          "X-SHD-Worker-Proxy": "1",
-          "X-SHD-Client": "web-player",
-        },
+        headers: upstreamHeaders({ Range: `bytes=${blockStart}-${blockEnd}` }),
       });
 
       if (!upstreamRes.ok && upstreamRes.status !== 206) {
@@ -251,7 +267,7 @@ export default {
 
       try {
         const up = await fetch(upstreamUrl, {
-          headers: { "X-SHD-Worker-Proxy": "1" },
+          headers: upstreamHeaders(),
         });
         if (!up.ok) return up;
         const body = await up.arrayBuffer();
@@ -277,10 +293,7 @@ export default {
       try {
         const up = await fetch(upstreamUrl, {
           method: "HEAD",
-          headers: {
-            "X-SHD-Worker-Proxy": "1",
-            "X-SHD-Client": "web-player",
-          },
+          headers: upstreamHeaders(),
         });
         const headers = new Headers(CORS_HEADERS);
         const pass = [

@@ -18,6 +18,7 @@ import {
 } from "@/lib/tgClient";
 import {
   buildStructuredCourseFromTelegram,
+  dedupeScannedItems,
   mergeTelegramItemsIntoExistingBatch,
   parseScannedTelegramItem,
 } from "@/lib/tgParser";
@@ -198,7 +199,7 @@ export async function POST(req: NextRequest) {
             lastSyncedAt: new Date().toISOString(),
             syncStatus: "error",
             lastSyncMessage:
-              "Is group me koi Video/PDF nahi mila. Check karein: (1) account group ka member hai? (2) Max Messages limit badhayein? (3) group username sahi hai?",
+              "No video or PDF was found in this group. Please check: (1) is the account a member of the group? (2) increase the Max Messages limit, (3) is the group username correct?",
           });
         } catch {
           // ignore
@@ -208,13 +209,19 @@ export async function POST(req: NextRequest) {
           {
             ok: false,
             error:
-              "No Videos or PDFs found in this group! Check that your Telegram account is a member of this group. (Max Messages limit badha kar dubara try karein.)",
+              "No videos or PDFs were found in this group. Please make sure your Telegram account is a member of this group, then increase the Max Messages limit and try again.",
           },
           { status: 400 }
         );
       }
 
-      const parsedItems = scanned.items.map((it) =>
+      // 🔁 DEDUPE (v5): ek hi lecture 2 baar scan ho jaye (duplicate upload /
+      //    2 channel me same file) to SIRF best copy rakhi jati hai — jiska
+      //    caption sabse complete hai (Title:/Batch:/Topic: labels), file badi
+      //    hai aur message purana (original) hai.
+      const deduped = dedupeScannedItems(scanned.items);
+
+      const parsedItems = deduped.items.map((it) =>
         parseScannedTelegramItem(
           it,
           customCourseTitle || scanned.groupTitle
@@ -325,7 +332,7 @@ export async function POST(req: NextRequest) {
 
           if (candidateBatches.length === 0) {
             problems.push(
-              "Merge ke liye koi JSON course nahi mila — pehle Courses Studio me JSON import karein ya target course chunein."
+              "No JSON course was found to merge into — please import a JSON in Courses Studio first, or select a target course."
             );
           }
 
@@ -362,7 +369,7 @@ export async function POST(req: NextRequest) {
             mergedPdfsCount === 0
           ) {
             problems.push(
-              "Kisi bhi JSON course me matching lecture nahi mila (title/batch naam alag ho sakta hai). Target Course dropdown se exact course chun kar dubara Merge chalayein."
+              "No matching lecture was found in any JSON course (the title or course name may differ). Please pick the right course from the Target Course dropdown se exact course chun kar dubara Merge chalayein."
             );
           }
         } catch (err) {
@@ -403,6 +410,7 @@ export async function POST(req: NextRequest) {
         ok: status !== "error",
         partial: status === "partial",
         groupTitle: scanned.groupTitle,
+        duplicatesRemoved: deduped.removedDuplicates,
         videosFound: totalVideosFound,
         pdfsFound: totalPdfsFound,
         youtubeOnlyCount,
@@ -432,7 +440,7 @@ export async function POST(req: NextRequest) {
             ...rec,
             createdBatchId: undefined,
             syncStatus: "partial",
-            lastSyncMessage: `Course ${batchId} delete kar diya gaya.`,
+            lastSyncMessage: `Course ${batchId} was deleted.`,
             lastSyncedAt: new Date().toISOString(),
           });
         }
