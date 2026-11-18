@@ -27,6 +27,7 @@ import SafeImage from "@/components/SafeImage";
 import LoginGateCard from "@/components/LoginGateCard";
 import PleaseWaitScreen from "@/components/PleaseWaitScreen";
 import SmartVideoPlayer from "@/components/SmartVideoPlayer";
+import TelegramDeliveryCard from "@/components/TelegramDeliveryCard";
 import { formatBytesHuman } from "@/lib/clientDownloads";
 import { apiUrl } from "@/config/siteConfig";
 
@@ -54,10 +55,20 @@ interface WatchApiResponse {
   isYoutubeOnly?: boolean;
   fileSize?: number;
   allowVideoDownload?: boolean;
-  telegramBotUrl?: string;
-  telegramBotUsername?: string;
-  telegramChannelUrl?: string;
   siblings: SiblingVideo[];
+  /** Telegram bot delivery */
+  courseName?: string;
+  topic?: string;
+  deliveryMode?: "telegram-bot" | "in-app-player";
+  bot?: {
+    username: string;
+    dailyLimit: number;
+    autoDeleteHours: number;
+    creditUsername: string;
+    contactUsername: string;
+    paused: boolean;
+    deliveryMode: string;
+  };
 }
 
 const SPEED_OPTIONS = [0.75, 1, 1.25, 1.5, 1.75, 2];
@@ -85,9 +96,9 @@ export default function WatchLecturePage() {
   const [loading, setLoading] = useState(true);
   const [videoBuffering, setVideoBuffering] = useState(false);
   const [streamError, setStreamError] = useState("");
-  const [playerSource, setPlayerSource] = useState<"TELEGRAM" | "YOUTUBE">(
-    "TELEGRAM"
-  );
+  // Browser player sirf tab chalta hai jab admin ne in-app-player mode set kiya
+  // ho, ya user ne khud "play here" fallback dabaya ho.
+  const [forceBrowserPlayer, setForceBrowserPlayer] = useState(false);
   const [playbackRate, setPlaybackRate] = useState(1);
   const [offlineUrl, setOfflineUrl] = useState<string | null>(null);
   const [streamModeInfo, setStreamModeInfo] = useState("");
@@ -135,11 +146,6 @@ export default function WatchLecturePage() {
       .then((res: WatchApiResponse) => {
         if (active && res?.ok) {
           setData(res);
-          if (res.telegramStreamUrl) {
-            setPlayerSource("TELEGRAM");
-          } else if (res.embedUrl) {
-            setPlayerSource("YOUTUBE");
-          }
         }
       })
       .catch(() => {})
@@ -328,7 +334,14 @@ export default function WatchLecturePage() {
     typeof window !== "undefined" &&
     window.innerHeight >= window.innerWidth;
 
-  const hasBothSources = Boolean(data?.telegramStreamUrl && data?.embedUrl);
+  // VIDEO AB TELEGRAM BOT SE AATI HAI (in-site player ki jagah "Open in
+  // Telegram"). YouTube embed playback hata diya gaya hai — jis lecture me
+  // Telegram video file nahi hai wahan English "content unavailable" card
+  // dikhta hai (koi iframe nahi chalta).
+  const botDeliveryActive =
+    data?.deliveryMode !== "in-app-player" &&
+    Boolean(data?.telegramStreamUrl) &&
+    !forceBrowserPlayer;
 
   return (
     <div
@@ -373,72 +386,34 @@ export default function WatchLecturePage() {
                   Loading lecture
                 </p>
               </div>
-            ) : data?.embedUrl ? (
-              /* YouTube-embedded lecture (no Telegram file) */
-              <iframe
-                src={data.embedUrl}
-                title={data.video?.title || "Lecture"}
-                className="h-full w-full border-0"
-                allow="accelerometer; autoplay; clipboard-write; encrypted-media; gyroscope; picture-in-picture; fullscreen"
-                allowFullScreen
+            ) : botDeliveryActive ? (
+              /* Telegram bot delivery — video privately Telegram par milti hai */
+              <TelegramDeliveryCard
+                batchId={batchId}
+                videoId={videoId}
+                title={data?.video?.title || "Lecture"}
+                topic={data?.topic || data?.folderTitle || ""}
+                courseName={data?.courseName || data?.batch?.name || ""}
+                thumbnail={data?.video?.thumbnail}
+                defaultImage={config.defaultImageUrl}
+                fileSize={data?.fileSize}
+                botUsername={data?.bot?.username || config.telegramBotUsername}
+                dailyLimit={data?.bot?.dailyLimit ?? config.dailyVideoLimit}
+                autoDeleteHours={
+                  data?.bot?.autoDeleteHours ?? config.autoDeleteHours
+                }
+                creditUsername={
+                  data?.bot?.creditUsername || config.creditUsername
+                }
+                contactUsername={
+                  data?.bot?.contactUsername || config.contactUsername
+                }
+                paused={Boolean(data?.bot?.paused || config.botDeliveryPaused)}
+                fallbackStreamUrl={data?.telegramStreamUrl}
+                onUseFallback={() => setForceBrowserPlayer(true)}
               />
-            ) : data?.telegramBotUrl ? (
-              /* ═══ TELEGRAM GATEWAY STAGE ═══ */
-              <div className="relative flex h-full w-full flex-col items-center justify-center overflow-hidden px-6 text-center">
-                <SafeImage
-                  src={data.video?.thumbnail}
-                  fallbackSrc={config.defaultImageUrl}
-                  alt={data.video?.title || "Lecture"}
-                  className="absolute inset-0 h-full w-full object-cover opacity-[0.16]"
-                />
-                <div className="absolute inset-0 bg-gradient-to-t from-ink-950 via-ink-950/85 to-ink-950/60" />
-
-                <div className="relative z-10 w-full max-w-sm">
-                  <span className="inline-flex items-center gap-1.5 rounded-tag border border-ember-500/35 bg-ember-500/10 px-2.5 py-1 text-[10px] font-extrabold uppercase tracking-[0.16em] text-ember-300">
-                    <Send className="h-3 w-3" />
-                    Telegram delivery
-                  </span>
-
-                  <h2 className="mt-3 font-display text-[19px] font-semibold leading-snug text-sand-100 sm:text-[22px]">
-                    Open in Telegram to watch
-                  </h2>
-                  <p className="mx-auto mt-1.5 max-w-xs text-[12px] leading-relaxed text-sand-400">
-                    The lecture is delivered privately by our bot. It expires
-                    automatically after 3 hours.
-                  </p>
-
-                  <a
-                    href={data.telegramBotUrl}
-                    target="_blank"
-                    rel="noopener noreferrer"
-                    className="btn-ember mt-4 w-full py-3.5 text-[12px] uppercase tracking-[0.14em]"
-                  >
-                    <Send className="h-4 w-4" />
-                    <span>Open in Telegram</span>
-                    <ArrowUpRight className="h-4 w-4" />
-                  </a>
-
-                  {data.telegramChannelUrl && (
-                    <a
-                      href={data.telegramChannelUrl}
-                      target="_blank"
-                      rel="noopener noreferrer"
-                      className="btn-ghost mt-2 w-full py-2.5 text-[11px] uppercase tracking-[0.12em]"
-                    >
-                      <Radio className="h-3.5 w-3.5" />
-                      <span>Join our channel</span>
-                    </a>
-                  )}
-
-                  <p className="mt-3 text-[10.5px] leading-relaxed text-sand-500">
-                    Link valid for 20 minutes. In Telegram, press{" "}
-                    <span className="font-semibold text-sand-300">Start</span> and
-                    the video will be sent to you.
-                  </p>
-                </div>
-              </div>
             ) : data?.telegramStreamUrl ? (
-              /* Legacy in-site stream (fallback if bot not configured) */
+              /* In-app player (admin mode) ya user ne fallback chuna */
               <>
                 <SmartVideoPlayer
                   primarySrc={data.telegramStreamUrl}
@@ -451,7 +426,7 @@ export default function WatchLecturePage() {
                   onModeChange={(m, info) =>
                     setStreamModeInfo(
                       m === "offline"
-                        ? "OFFLINE"
+                        ? "OFFLINE — playing from your device (no internet)"
                         : info
                         ? `${m.toUpperCase()} — ${info}`
                         : m.toUpperCase()
@@ -470,14 +445,34 @@ export default function WatchLecturePage() {
                 )}
               </>
             ) : (
-              <div className="flex h-full w-full flex-col items-center justify-center gap-2 px-6 text-center">
-                <Sparkles className="h-6 w-6 text-ember-400" />
-                <p className="font-display text-[16px] font-semibold text-sand-100">
-                  Stream not linked yet
-                </p>
-                <p className="max-w-xs text-[12px] leading-relaxed text-sand-400">
-                  This lecture has no stream yet. Please check back soon.
-                </p>
+              /* No Telegram file (incl. YouTube-only lectures): YouTube embed
+                 playback hata diya gaya hai, isliye English "content
+                 unavailable" card dikhta hai — koi iframe nahi chalta. */
+              <div className="relative flex h-full w-full flex-col items-center justify-center overflow-hidden px-6 text-center">
+                <SafeImage
+                  src={data?.video?.thumbnail}
+                  fallbackSrc={config.defaultImageUrl}
+                  alt={data?.video?.title || "Lecture"}
+                  className="absolute inset-0 h-full w-full object-cover opacity-[0.14]"
+                />
+                <div className="absolute inset-0 bg-gradient-to-t from-ink-950 via-ink-950/85 to-ink-950/60" />
+                <div className="relative z-10 flex max-w-sm flex-col items-center gap-2.5">
+                  <span className="inline-flex items-center gap-1.5 rounded-tag border border-ember-500/35 bg-ember-500/10 px-2.5 py-1 text-[10px] font-extrabold uppercase tracking-[0.16em] text-ember-300">
+                    <Sparkles className="h-3 w-3" />
+                    Content unavailable
+                  </span>
+                  <p className="font-display text-[19px] font-semibold leading-snug text-sand-100 sm:text-[22px]">
+                    This Lecture Is Not Available Yet
+                  </p>
+                  <p className="max-w-xs text-[12px] leading-relaxed text-sand-400">
+                    This content is unavailable right now. It will be uploaded
+                    soon — please check back later.
+                  </p>
+                  <span className="mt-1 inline-flex items-center gap-1.5 text-[10.5px] font-semibold uppercase tracking-[0.14em] text-sand-500">
+                    <Clock className="h-3.5 w-3.5 text-ember-400" />
+                    Upload in progress
+                  </span>
+                </div>
               </div>
             )}
           </div>
@@ -516,8 +511,12 @@ export default function WatchLecturePage() {
                 </span>
               </button>
 
-              {/* 📥 In-App Offline Vault Save (file phone me NAHI jati) */}
-              {data?.telegramStreamUrl && data.allowVideoDownload !== false && (
+              {/* 📥 In-App Offline Vault Save (file phone me NAHI jati) —
+                  sirf browser-player mode me — bot delivery
+                  me video Telegram par hi milti hai (auto-delete ke saath). */}
+              {!botDeliveryActive &&
+                data?.telegramStreamUrl &&
+                data.allowVideoDownload !== false && (
                 <div className="flex flex-wrap items-center gap-2">
                   <button
                     type="button"

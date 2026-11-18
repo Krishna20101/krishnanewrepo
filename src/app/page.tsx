@@ -122,15 +122,19 @@ export default function HomePage() {
               )}
             </button>
 
-            <a
-              href={config.telegramJoinUrl}
-              target="_blank"
-              rel="noopener noreferrer"
-              title="Telegram"
-              className="flex h-9 w-9 items-center justify-center rounded-xl border border-white/12 bg-white/[0.04] text-sand-200 transition hover:border-sage-400/45 hover:text-sage-300"
-            >
-              <Send className="h-[16px] w-[16px]" />
-            </a>
+            {/* FIX: dead/empty Telegram link render hi nahi hota — sirf tab
+                dikhta hai jab admin ne real channel link set kiya ho. */}
+            {config.telegramJoinUrlConfigured ? (
+              <a
+                href={config.telegramJoinUrl}
+                target="_blank"
+                rel="noopener noreferrer"
+                title="Telegram"
+                className="flex h-9 w-9 items-center justify-center rounded-xl border border-white/12 bg-white/[0.04] text-sand-200 transition hover:border-sage-400/45 hover:text-sage-300"
+              >
+                <Send className="h-[16px] w-[16px]" />
+              </a>
+            ) : null}
 
             <button
               type="button"

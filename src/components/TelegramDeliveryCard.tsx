@@ -1,0 +1,432 @@
+"use client";
+
+import React, { useCallback, useEffect, useRef, useState } from "react";
+import {
+  AlertTriangle,
+  CheckCircle2,
+  Clock,
+  Copy,
+  ExternalLink,
+  Loader2,
+  Play,
+  Send,
+  ShieldCheck,
+  Smartphone,
+} from "lucide-react";
+import SafeImage from "@/components/SafeImage";
+import { apiUrl } from "@/config/siteConfig";
+
+// ============================================================================
+// 🤖 TELEGRAM DELIVERY CARD  (v5 — video player ki jagah)
+// ----------------------------------------------------------------------------
+// Purana flow: video Vercel/Cloudflare se chunk-stream hoti thi → "jhal-jhal",
+// 1-2 second aage-peeche, frame jump (user ka sir chakra jata tha).
+//
+// Naya flow: yahan ek phone mockup + ▶ OPEN IN TELEGRAM button hai. Tap karte
+// hi server ek one-time deep-link banata hai (POST /api/tg/request) aur
+// `https://t.me/<bot>?start=<id>` khul jata hai. Bot wo lecture aapke
+// Telegram par download + upload kar deta hai (live progress ke saath),
+// 2 ghante baad auto-delete, aur daily limit ke andar.
+//
+// Saara user-facing text ENGLISH me hai (project rule).
+// ============================================================================
+
+type CardStatus = "idle" | "linking" | "ready" | "error";
+
+export interface TelegramDeliveryCardProps {
+  batchId: string;
+  videoId: string;
+  title: string;
+  topic?: string;
+  courseName?: string;
+  thumbnail?: string;
+  defaultImage?: string;
+  fileSize?: number;
+  botUsername?: string;
+  dailyLimit?: number;
+  autoDeleteHours?: number;
+  creditUsername?: string;
+  contactUsername?: string;
+  paused?: boolean;
+  /** Admin ne in-app player allow kiya ho to subtle fallback link dikhta hai */
+  fallbackStreamUrl?: string;
+  onUseFallback?: () => void;
+}
+
+function formatSize(bytes?: number): string {
+  const size = Number(bytes || 0);
+  if (!size) return "";
+  if (size < 1024 * 1024) return `${(size / 1024).toFixed(0)} KB`;
+  if (size < 1024 * 1024 * 1024) return `${(size / (1024 * 1024)).toFixed(1)} MB`;
+  return `${(size / (1024 * 1024 * 1024)).toFixed(2)} GB`;
+}
+
+export default function TelegramDeliveryCard({
+  batchId,
+  videoId,
+  title,
+  topic,
+  courseName,
+  thumbnail,
+  defaultImage,
+  fileSize,
+  botUsername,
+  dailyLimit = 12,
+  autoDeleteHours = 2,
+  creditUsername = "krishna84",
+  contactUsername = "krishna84",
+  paused = false,
+  fallbackStreamUrl,
+  onUseFallback,
+}: TelegramDeliveryCardProps) {
+  const [status, setStatus] = useState<CardStatus>("idle");
+  const [deepLink, setDeepLink] = useState("");
+  const [error, setError] = useState("");
+  const [copied, setCopied] = useState(false);
+  const [notice, setNotice] = useState("");
+  /** 🛡️ server se aaya hua daily quota — user ko dikhta hai ki kitne bache hain */
+  const [quota, setQuota] = useState<{
+    limit: number;
+    used: number;
+    remaining: number;
+    resetInSec: number;
+  } | null>(null);
+  const busyRef = useRef(false);
+
+  useEffect(() => {
+    // Naye lecture par state reset
+    setStatus("idle");
+    setDeepLink("");
+    setError("");
+    setNotice("");
+    setCopied(false);
+    busyRef.current = false;
+  }, [batchId, videoId]);
+
+  const openTelegram = useCallback(async () => {
+    if (busyRef.current) return;
+    busyRef.current = true;
+    setStatus("linking");
+    setError("");
+    setNotice("");
+
+    try {
+      const res = await fetch(apiUrl("/api/tg/request"), {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ batchId, videoId }),
+        cache: "no-store",
+      });
+      const data = await res.json().catch(() => ({}));
+
+      if (!res.ok || !data?.ok || !data?.deepLink) {
+        setStatus("error");
+        setError(
+          String(
+            data?.error || "Could not create your Telegram link. Please try again."
+          )
+        );
+        // 🛡️ limit/throttle wali response me bhi quota info aata hai
+        if (data?.quota && typeof data.quota === "object") {
+          setQuota({
+            limit: Number(data.quota.limit || dailyLimit),
+            used: Number(data.quota.used || 0),
+            remaining: Number(data.quota.remaining || 0),
+            resetInSec: Number(data.quota.resetInSec || 0),
+          });
+        }
+        return;
+      }
+
+      setDeepLink(String(data.deepLink));
+      setStatus("ready");
+
+      // 🛡️ quota server se aata hai — "X of Y left today" dikhate hain
+      if (data.quota && typeof data.quota === "object") {
+        setQuota({
+          limit: Number(data.quota.limit || dailyLimit),
+          used: Number(data.quota.used || 0),
+          remaining: Number(data.quota.remaining || 0),
+          resetInSec: Number(data.quota.resetInSec || 0),
+        });
+      }
+
+      if (data.reused) {
+        setNotice(
+          "This is the same link you created a few minutes ago — it works only once, so open it in Telegram now."
+        );
+      }
+
+      // Popup blocker se bachne ke liye pehle blank tab, phir location set
+      const win =
+        typeof window !== "undefined"
+          ? window.open("", "_blank", "noopener,noreferrer")
+          : null;
+      if (win) {
+        win.opener = null;
+        win.location.href = String(data.deepLink);
+      } else if (typeof window !== "undefined") {
+        window.location.href = String(data.deepLink);
+      }
+    } catch {
+      setStatus("error");
+      setError("Network error while creating your Telegram link. Please try again.");
+    } finally {
+      busyRef.current = false;
+    }
+  }, [batchId, videoId]);
+
+  const copyLink = useCallback(async () => {
+    if (!deepLink) return;
+    try {
+      await navigator.clipboard.writeText(deepLink);
+      setCopied(true);
+      setTimeout(() => setCopied(false), 2200);
+    } catch {
+      setCopied(false);
+    }
+  }, [deepLink]);
+
+  const sizeText = formatSize(fileSize);
+
+  return (
+    <div className="relative flex h-full w-full items-center justify-center overflow-hidden bg-ink-950 p-4">
+      {/* Ambient glow + thumbnail blur */}
+      <SafeImage
+        src={thumbnail}
+        fallbackSrc={defaultImage}
+        alt={title}
+        className="absolute inset-0 h-full w-full object-cover opacity-15 blur-[2px]"
+      />
+      <div className="pointer-events-none absolute inset-0 bg-gradient-to-t from-ink-950 via-ink-950/85 to-ink-950/55" />
+
+      <div className="relative z-10 flex w-full max-w-lg flex-col items-center gap-4">
+        {/* ── PHONE MOCKUP (tap target) ─────────────────────────────────── */}
+        <button
+          type="button"
+          onClick={openTelegram}
+          disabled={status === "linking" || paused}
+          aria-label="Open in Telegram"
+          className="group relative w-[170px] shrink-0 rounded-card border border-ember-500/30 bg-gradient-to-b from-ink-850 to-ink-950 p-2.5 shadow-lift transition active:scale-[0.97] disabled:cursor-not-allowed disabled:opacity-70 sm:w-[190px]"
+        >
+          <span className="mx-auto mb-2 block h-1.5 w-12 rounded-full bg-white/15" />
+          <span className="relative flex aspect-[9/16] w-full flex-col items-center justify-center gap-3 overflow-hidden rounded-tag bg-ink-900">
+            {/* pulse rings */}
+            <span className="pointer-events-none absolute h-24 w-24 animate-ping rounded-full bg-ember-500/15" />
+            <span className="pointer-events-none absolute h-16 w-16 rounded-full bg-ember-500/20 blur-md" />
+
+            <span className="relative flex h-14 w-14 items-center justify-center rounded-full bg-gradient-to-br from-[#2AABEE] to-[#229ED9] shadow-lg">
+              {status === "linking" ? (
+                <Loader2 className="h-7 w-7 animate-spin text-sand-100" />
+              ) : status === "ready" ? (
+                <CheckCircle2 className="h-7 w-7 text-sand-100" />
+              ) : (
+                <Send className="h-6 w-6 translate-x-[1px] text-sand-100" />
+              )}
+            </span>
+
+            <span className="relative px-3 text-center text-[11px] font-black uppercase tracking-[0.16em] text-ember-300">
+              {status === "linking"
+                ? "Creating link…"
+                : status === "ready"
+                  ? "Tap again to reopen"
+                  : "Open in Telegram"}
+            </span>
+            <span className="relative px-3 text-center text-[10px] font-semibold leading-snug text-sand-400">
+              {paused
+                ? "Delivery paused by admin"
+                : "Video will arrive in your Telegram chat"}
+            </span>
+          </span>
+          <span className="mx-auto mt-2 block h-1 w-16 rounded-full bg-white/10" />
+        </button>
+
+        {/* ── PRIMARY ACTION ────────────────────────────────────────────── */}
+        <div className="w-full space-y-2.5">
+          <button
+            type="button"
+            onClick={openTelegram}
+            disabled={status === "linking" || paused}
+            className="btn-ember w-full px-5 py-3.5 text-[13px] uppercase tracking-[0.14em] disabled:cursor-not-allowed disabled:opacity-60"
+          >
+            {status === "linking" ? (
+              <Loader2 className="h-5 w-5 animate-spin" />
+            ) : (
+              <Send className="h-5 w-5" />
+            )}
+            <span>
+              {status === "linking"
+                ? "Opening Telegram…"
+                : status === "ready"
+                  ? "Open Video in Telegram"
+                  : "Open in Telegram"}
+            </span>
+          </button>
+
+          {deepLink && (
+            <div className="surface flex items-center gap-2 rounded-xl px-3 py-2">
+              <code className="min-w-0 flex-1 truncate text-[11px] font-semibold text-ember-300">
+                {deepLink}
+              </code>
+              <button
+                type="button"
+                onClick={copyLink}
+                className="btn-ghost shrink-0 px-2.5 py-1.5 text-[10px] uppercase tracking-[0.1em]"
+              >
+                {copied ? <CheckCircle2 className="h-3.5 w-3.5 text-sage-300" /> : <Copy className="h-3.5 w-3.5" />}
+                <span>{copied ? "Copied" : "Copy"}</span>
+              </button>
+              <a
+                href={deepLink}
+                target="_blank"
+                rel="noopener noreferrer"
+                className="btn-ghost shrink-0 border-ember-500/40 bg-ember-500/12 px-2.5 py-1.5 text-[10px] uppercase tracking-[0.1em] text-ember-200"
+              >
+                <ExternalLink className="h-3.5 w-3.5" />
+                <span>Open</span>
+              </a>
+            </div>
+          )}
+
+          {status === "error" && error && (
+            <div className="flex items-start gap-2 rounded-xl border border-rose-400/30 bg-rose-500/10 px-3.5 py-3">
+              <AlertTriangle className="mt-0.5 h-4 w-4 shrink-0 text-rose-300" />
+              <p className="text-[11px] font-semibold leading-relaxed text-rose-100">
+                {error}
+                {botUsername ? "" : " Ask the admin to start the delivery bot once."}
+              </p>
+            </div>
+          )}
+
+          {notice && (
+            <div className="flex items-start gap-2 rounded-xl border border-ember-500/30 bg-ember-500/10 px-3.5 py-3">
+              <AlertTriangle className="mt-0.5 h-4 w-4 shrink-0 text-ember-400" />
+              <p className="text-[11px] font-semibold leading-relaxed text-ember-200">{notice}</p>
+            </div>
+          )}
+
+          {status === "ready" && !notice && (
+            <div className="flex items-start gap-2 rounded-xl border border-sage-400/30 bg-sage-500/10 px-3.5 py-3">
+              <CheckCircle2 className="mt-0.5 h-4 w-4 shrink-0 text-sage-300" />
+              <p className="text-[11px] font-semibold leading-relaxed text-sage-300">
+                Telegram opened. The bot is searching your lecture now — watch the
+                live progress there (Downloading → Uploading). If nothing opened,
+                use the link above.
+              </p>
+            </div>
+          )}
+        </div>
+
+        {/* ── 🛡️ DAILY QUOTA (anti-theft) ───────────────────────────────── */}
+        {quota ? (
+          <div className="flex w-full items-center justify-between gap-3 rounded-xl border border-ember-500/25 bg-ember-500/[0.07] px-3.5 py-2.5">
+            <span className="flex items-center gap-2 text-[11px] font-bold text-ember-200">
+              <ShieldCheck className="h-3.5 w-3.5 shrink-0 text-ember-400" />
+              {quota.remaining > 0
+                ? `${quota.remaining} of ${quota.limit} videos left today`
+                : `Daily limit reached (${quota.used}/${quota.limit})`}
+            </span>
+            {quota.remaining <= 0 && quota.resetInSec > 0 ? (
+              <span className="shrink-0 text-[10px] font-black uppercase tracking-wider text-ember-300">
+                resets in {Math.max(1, Math.ceil(quota.resetInSec / 3600))}h
+              </span>
+            ) : (
+              <span className="shrink-0 text-[10px] font-semibold text-sand-400">
+                used {quota.used}/{quota.limit}
+              </span>
+            )}
+          </div>
+        ) : (
+          <div className="flex w-full items-center gap-2 rounded-xl border border-white/[0.08] bg-white/[0.03] px-3.5 py-2.5">
+            <ShieldCheck className="h-3.5 w-3.5 shrink-0 text-sage-300" />
+            <span className="text-[11px] font-semibold text-sand-300">
+              Fair-use limit: {dailyLimit} videos every 24 hours • each link works
+              once, for your Telegram account only
+            </span>
+          </div>
+        )}
+
+        {/* ── LECTURE META ──────────────────────────────────────────────── */}
+        <div className="surface w-full rounded-card p-3.5">
+          <h2 className="line-clamp-2 text-sm font-extrabold leading-snug text-sand-100">{title}</h2>
+          {topic ? (
+            <p className="mt-1 line-clamp-2 text-[11px] font-semibold text-ember-400/90">
+              📚 Topic: {topic}
+            </p>
+          ) : null}
+          {courseName ? (
+            <p className="mt-0.5 line-clamp-1 text-[11px] font-semibold text-sage-300/90">
+              🎓 Course: {courseName}
+            </p>
+          ) : null}
+          {sizeText ? (
+            <p className="mt-0.5 text-[10px] font-bold uppercase tracking-wide text-sand-400">
+              Size: {sizeText}
+            </p>
+          ) : null}
+        </div>
+
+        {/* ── RULES / INFO CHIPS ────────────────────────────────────────── */}
+        <div className="grid w-full grid-cols-1 gap-2 sm:grid-cols-3">
+          <div className="chip items-start rounded-tag px-3 py-2.5 text-left">
+            <Play className="mt-0.5 h-3.5 w-3.5 shrink-0 text-ember-400" />
+            <p className="text-[10px] font-semibold leading-snug text-sand-300">
+              Daily limit: <span className="text-sand-100">{dailyLimit} videos / 24h</span>
+              <br />
+              Need more? Contact @{contactUsername}
+            </p>
+          </div>
+          <div className="chip items-start rounded-tag px-3 py-2.5 text-left">
+            <Clock className="mt-0.5 h-3.5 w-3.5 shrink-0 text-ember-400" />
+            <p className="text-[10px] font-semibold leading-snug text-sand-300">
+              Auto-delete after{" "}
+              <span className="text-sand-100">{autoDeleteHours} hour{autoDeleteHours === 1 ? "" : "s"}</span>
+              <br />
+              Save it before that
+            </p>
+          </div>
+          <div className="chip items-start rounded-tag px-3 py-2.5 text-left">
+            <ShieldCheck className="mt-0.5 h-3.5 w-3.5 shrink-0 text-sage-300" />
+            <p className="text-[10px] font-semibold leading-snug text-sand-300">
+              Smooth playback, no buffering
+              <br />
+              Extracted By @{creditUsername}
+            </p>
+          </div>
+        </div>
+
+        {/* ── HOW IT WORKS ──────────────────────────────────────────────── */}
+        <ol className="surface w-full space-y-1.5 rounded-card p-3.5">
+          {[
+            "Tap OPEN IN TELEGRAM above.",
+            botUsername
+              ? `Telegram opens @${botUsername} with your lecture request.`
+              : "Telegram opens the delivery bot with your lecture request.",
+            "The bot sends the video with live progress, then deletes it automatically.",
+          ].map((step, idx) => (
+            <li key={step} className="flex items-start gap-2">
+              <span className="mt-0.5 flex h-4 w-4 shrink-0 items-center justify-center rounded-full bg-ember-500/20 text-[9px] font-black text-ember-300">
+                {idx + 1}
+              </span>
+              <span className="text-[11px] font-medium leading-snug text-sand-300">{step}</span>
+            </li>
+          ))}
+        </ol>
+
+        {/* ── OPTIONAL FALLBACK (admin ne in-app player allow kiya ho) ──── */}
+        {fallbackStreamUrl && onUseFallback ? (
+          <div className="w-full pt-1 text-center">
+            <button
+              type="button"
+              onClick={onUseFallback}
+              className="inline-flex items-center gap-1.5 text-[10px] font-bold uppercase tracking-wide text-sand-500 underline-offset-4 transition hover:text-sand-200 hover:underline"
+            >
+              <Smartphone className="h-3.5 w-3.5" />
+              <span>Play in browser instead (may buffer)</span>
+            </button>
+          </div>
+        ) : null}
+      </div>
+    </div>
+  );
+}

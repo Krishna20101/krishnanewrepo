@@ -257,7 +257,7 @@ export default function PdfWebViewerPage() {
                 Please wait, loading PDF...
               </p>
               <p className="mt-1 text-xs text-slate-400">
-                Sirf pehla page load hoga, baaki pages scroll par aayenge.
+                Only the first page loads now; the remaining pages load as you scroll.
               </p>
             </div>
           </div>
@@ -272,7 +272,7 @@ export default function PdfWebViewerPage() {
             accent="pink"
             badge="NOTES UPLOADING SOON"
             title="Class Notes PDF — Coming Soon!"
-            subtitle="Is lecture ka PDF abhi upload ho raha hai. Telegram Sync ya Admin Panel se add hote hi yahan website ke andar khulega!"
+            subtitle="The PDF for this lecture is being uploaded. It will appear on this website as soon as the admin adds it via Telegram Sync or the Admin Panel."
           />
         ) : useIframeFallback ? (
           <div className="flex flex-1 flex-col overflow-hidden rounded-3xl border border-white/15 bg-[#0a0e24]">

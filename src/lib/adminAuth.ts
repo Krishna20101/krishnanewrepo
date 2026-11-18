@@ -2,6 +2,7 @@ import "server-only";
 import crypto from "crypto";
 import { NextRequest } from "next/server";
 import { cleanEnv } from "@/config/firebaseConfig";
+import { getServerMasterSecret } from "@/lib/serverSecrets";
 
 // ============================================================================
 // 100% STRICT .ENV SERVER-ONLY ADMIN AUTHENTICATION
@@ -11,8 +12,12 @@ import { cleanEnv } from "@/config/firebaseConfig";
 
 export const ADMIN_COOKIE_NAME = "shd_admin_token";
 
-const EPHEMERAL_FALLBACK_KEY = crypto.randomBytes(64).toString("hex");
-
+/**
+ * 🔒 FIX (v5): per-module random fallback hata diya (dev me admin session ek
+ * route se dusre route tak verify nahi hota tha). Ab production me secret
+ * missing hone par ServerConfigError → admin login par clear 503 message,
+ * aur development me globalThis-stable key. Pehle ke branches unchanged hain.
+ */
 function getSessionSecret(): string {
   const explicit = cleanEnv(process.env.ADMIN_SESSION_SECRET);
   if (explicit && explicit.length >= 16) return explicit;
@@ -26,7 +31,7 @@ function getSessionSecret(): string {
       .digest("hex");
   }
 
-  return EPHEMERAL_FALLBACK_KEY;
+  return getServerMasterSecret();
 }
 
 export function isAdminEnvConfigured(): boolean {
@@ -41,34 +46,12 @@ export function isAdminEnvConfigured(): boolean {
   return hasPlain || hasHashed;
 }
 
-const loginAttempts = new Map<string, { count: number; lockUntil: number }>();
-
-export function checkAdminRateLimit(ip: string): {
-  allowed: boolean;
-  retryAfterSec?: number;
-} {
-  const now = Date.now();
-  const record = loginAttempts.get(ip);
-  if (record && record.lockUntil > now) {
-    return {
-      allowed: false,
-      retryAfterSec: Math.ceil((record.lockUntil - now) / 1000),
-    };
-  }
-  return { allowed: true };
-}
-
-export function recordFailedAdminAttempt(ip: string): void {
-  const now = Date.now();
-  const prev = loginAttempts.get(ip);
-  const count = (prev && prev.lockUntil <= now ? 0 : prev?.count || 0) + 1;
-  const lockUntil = count >= 5 ? now + 5 * 60 * 1000 : 0;
-  loginAttempts.set(ip, { count, lockUntil });
-}
-
-export function clearAdminAttempts(ip: string): void {
-  loginAttempts.delete(ip);
-}
+/**
+ * 🔒 Brute-force protection ab DATABASE-backed hai (`src/lib/rtStore.ts` →
+ * `rateLimitCheck` / `rateLimitHit`), kyunki in-memory Map Vercel par kaam hi
+ * nahi karta tha: har container ka apna Map hota hai aur container recycle
+ * hote rehte hain → attacker unlimited attempts kar sakta tha.
+ */
 
 function safeCompareStrings(input: string, secret: string): boolean {
   const key = getSessionSecret();

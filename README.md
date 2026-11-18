@@ -9,34 +9,48 @@
 | 3 | **Home page simplified** — login ke baad seedha course list. Search ab plain field hai (corner-bracket animation hataya). |
 | 4 | **Naye course tiles** — flat surface, left ember rail, corner index number, hairline meta row, arrow affordance. Thumbnail hover par depth (koi neon/glow nahi). |
 | 5 | **Batch screen** — SUBJECTS / TEST / **LIVE hataya**. Ab sirf **Lectures** aur **Notes** ka segmented switch (ember underline). PDF rows document-style, video rows list-style. |
-| 6 | **Video delivery Telegram bot se** — Cloudflare Worker/Vercel streaming ki jagah ab `/watch` par **Open in Telegram** panel. Link encrypted + 20 min valid. |
+| 6 | **Video delivery Telegram bot se** — Cloudflare Worker/Vercel streaming ki jagah ab `/watch` par **Open in Telegram** panel. Deep-link single-use hai, account se bind hota hai aur daily quota + channel join-gate ke andar chalta hai. |
 | 7 | **Content guard** — right-click, text-copy, drag, DevTools/print shortcuts block + print CSS. (Server-side protection asli hai; ye casual copying rokta hai.) |
 | 8 | **Caption parser 10x better** — Hindi labels (टाइटल/बैच/विषय), emoji/bullets, `【Title】`, `|` single-line captions, `Lecture Name =` — sab parse hote hain. |
 | 9 | **Sync limit 1500 → 2500** (max 10000) + 400-message windows with retry → 1700-2000+ videos wale groups ek hi baar me sync. |
 
 ---
 
-## 🤖 Telegram Bot Gateway (naya)
+## 🤖 Telegram Delivery Bot (Python / Telethon)
 
-`/watch` screen par video ki jagah:
+`/watch` screen par video player ki jagah:
 
 ```
-Open in Telegram  →  t.me/<bot>?start=<encrypted token>
+Open in Telegram  →  website request banati hai (Firebase RTDB: tg_requests/<id>)
+        ↓            t.me/<bot>?start=<requestId>   (single-use, account-bound)
+Bot 🔒 join-gate check (agar ON hai) → member nahi to "Join our channel" + "I have joined"
+        ↓ member hai / gate off
+Bot 🛡️ anti-theft gate → global 24h breaker → link used? → dusre account ka link?
+        ↓ clear
+Bot daily quota check (12/24h default) → lecture ko course groups me DHOONDHTA hai
+        ↓  (title + topic + course name + file size se match, source kabhi leak nahi hota)
+Clean re-upload:  📺 Title / 📚 Topic / 🎓 Course / Extracted By @krishna84
         ↓
-Bot decrypt karta hai (chat id + message id) → join check (getChatMember)
-        ↓ join nahi  → "Join our channel" + "Continue" (live re-check)
-        ↓ join haan  → wahi video copyMessage se bhejta hai
-                       + "3 ghante me delete" notice
-                       → 3 ghante baad video + notice auto-delete
+2 ghante baad video + notice auto-delete (restart-safe deletion queue)
 ```
 
-- **Source group me forwarding OFF ho to bhi kaam karta hai** — `copyMessage` use hota hai, `forwardMessage` nahi.
-- Token AES-256-GCM encrypted + 20 minute expiry → koi URL tamper nahi kar sakta.
-- Bot code: **`telegram-bot/`** (Render deploy, `telegram-bot/README.md` dekhein).
-- Site par 2 env vars: `NEXT_PUBLIC_TELEGRAM_BOT_USERNAME`, `NEXT_PUBLIC_TELEGRAM_CHANNEL_URL`.
-- Bot ko **saare course groups me admin** banayein; join gate ke liye public channel me bhi.
-
-⚠️ Bot ke env me `ADMIN_SESSION_SECRET` **Vercel wali exact same value** honi chahiye — warna link decrypt nahi hoga.
+- **Bot:** `telegram-bot/bot.py` (Telethon) — koi bhi 24×7 host chalega: Render,
+  Railway, VPS ya apna PC. Setup: `telegram-bot/README.md`.
+- **Source group ka naam kabhi nahi dikhta** — `clean` mode me file download karke
+  fresh upload hoti hai (`forward` mode optional hai, usme original caption dikhta hai).
+- **Join-gate:** Admin Panel → Telegram Bot Delivery → *Channel join gate*. Bot ko us
+  channel me **ADMIN** banayein; check fail hone par gate **fail-open** rehta hai
+  (galat config ki saza student ko nahi milti, warning bot log me aati hai).
+- **Anti-theft:** har link single-use + pehle Telegram account se bind, site-wide
+  24h circuit breaker, per-login 15/10min aur per-IP 30/10min throttle, daily quota.
+- **YouTube embed playback hata diya gaya hai** — jis lecture me Telegram video file
+  nahi hai wahan English "content unavailable, will be uploaded soon" card dikhta hai.
+- **Purge:** Admin Panel → Telegram → *Danger zone* se saara Telegram-sourced data
+  (batch links, sync records, group registry, bot requests/state) ek click me saaf
+  hota hai — manually banaye courses aur real `data/batches/*.json` files safe rehti hain.
+- Site env vars: `NEXT_PUBLIC_TELEGRAM_BOT_USERNAME`, `NEXT_PUBLIC_TELEGRAM_CHANNEL_URL`.
+- ⚠️ Bot ke env me `ADMIN_SESSION_SECRET` **Vercel wali exact same value** honi
+  chahiye — isi se encrypted media vault decrypt hota hai.
 
 ---
 

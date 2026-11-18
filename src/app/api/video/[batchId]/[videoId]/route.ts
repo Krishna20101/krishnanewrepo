@@ -1,5 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
+import { getBotConfig } from "@/lib/botDelivery";
 import { isContentRequestAuthorized } from "@/lib/studentAuth";
+import { buildTopicPath } from "@/lib/tgMatch";
 import {
   findVideoInBatch,
   getEffectiveRootNodes,
@@ -8,12 +10,6 @@ import {
 } from "@/lib/batchEngine";
 import { getEffectiveSiteSettings, getVideoEmbed } from "@/lib/db";
 import { buildYoutubeEmbedUrl } from "@/lib/youtube";
-import { verifyTelegramMediaToken } from "@/lib/tgCrypto";
-import {
-  createBotHandoffToken,
-  getBotChannelUrl,
-  getBotUsername,
-} from "@/lib/botHandoff";
 
 export const dynamic = "force-dynamic";
 
@@ -33,10 +29,11 @@ export async function GET(
     const batchId = decodeURIComponent(params.batchId);
     const videoId = decodeURIComponent(params.videoId);
 
-    const [rawBatch, savedEmbed, settings] = await Promise.all([
+    const [rawBatch, savedEmbed, settings, botConfig] = await Promise.all([
       loadSingleRawBatch(batchId, { includeHidden: false }),
       getVideoEmbed(batchId, videoId),
       getEffectiveSiteSettings(),
+      getBotConfig().catch(() => null),
     ]);
 
     if (!rawBatch) {
@@ -96,26 +93,6 @@ export async function GET(
         : directStreamUrl
       : "";
 
-    // ── 🤖 BOT HANDOFF ("Open in Telegram") ────────────────────────────────
-    // tg_video_token ke andar encrypted chat id + message id hota hai.
-    // Usse ek 20-min encrypted handoff token banate hain jo bot ko bhejta hai.
-    let telegramBotUrl = "";
-    let telegramBotUsername = "";
-    const mediaPayload = tgToken ? verifyTelegramMediaToken(tgToken) : null;
-    const botUser = getBotUsername();
-    if (mediaPayload && botUser) {
-      const handoff = createBotHandoffToken({
-        c: mediaPayload.c,
-        m: mediaPayload.m,
-        t: String(located.video.title || "").slice(0, 120),
-        b: String(rawBatch.name || "").slice(0, 120),
-        f: String(located.folderTitle || "").slice(0, 120),
-        iat: Math.floor(Date.now() / 1000),
-      });
-      telegramBotUsername = botUser;
-      telegramBotUrl = `https://t.me/${botUser}?start=${handoff}`;
-    }
-
     const cleanVideo = toCleanNodeItem(located.video, undefined, batchId);
 
     // Limit sibling list to max 30 nearby items so watch page stays lightning fast on mobile!
@@ -127,12 +104,37 @@ export async function GET(
       .slice(sliceStart, sliceStart + 30)
       .map((s) => toCleanNodeItem(s, undefined, batchId));
 
+    const batchName = String(rawBatch.name || rawBatch.title || "Course");
+    const deliveryMode =
+      settings.videoDeliveryMode === "in-app-player" ? "in-app-player" : "telegram-bot";
+
     return NextResponse.json({
       ok: true,
       batch: {
         id: String(rawBatch.id || batchId),
-        name: String(rawBatch.name || rawBatch.title || "Course"),
+        name: batchName,
         thumbnail: String(rawBatch.thumbnail || "").trim(),
+      },
+      // 🤖 Telegram bot delivery (watch page isi se ▶ OPEN IN TELEGRAM dikhata hai)
+      courseName: batchName,
+      topic: buildTopicPath(
+        Array.isArray(located.folderPath) ? located.folderPath : [],
+        String(located.folderTitle || "")
+      ),
+      deliveryMode,
+      bot: {
+        username: String(botConfig?.botUsername || settings.telegramBotUsername || "").replace(
+          /^@+/,
+          ""
+        ),
+        dailyLimit: Number(botConfig?.dailyLimit || settings.dailyVideoLimit || 12),
+        autoDeleteHours: Number(botConfig?.autoDeleteHours || settings.autoDeleteHours || 2),
+        creditUsername: String(botConfig?.creditUsername || settings.creditUsername || "krishna84"),
+        contactUsername: String(
+          botConfig?.contactUsername || settings.contactUsername || "krishna84"
+        ),
+        paused: Boolean(botConfig?.paused),
+        deliveryMode: String(botConfig?.deliveryMode || "clean"),
       },
       video: cleanVideo,
       folderTitle: located.folderTitle,
@@ -146,10 +148,6 @@ export async function GET(
       isYoutubeOnly: Boolean(!tgToken && embedUrl),
       fileSize: located.video.file_size || 0,
       allowVideoDownload: settings.allowVideoDownload !== false,
-      // 🤖 Telegram bot gateway
-      telegramBotUrl,
-      telegramBotUsername,
-      telegramChannelUrl: getBotChannelUrl(),
       siblings: nearbySiblings,
     });
   } catch {

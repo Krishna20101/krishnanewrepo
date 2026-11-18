@@ -9,7 +9,10 @@ import { useApp } from "@/context/AppContext";
  * - Opens automatically when transitioning from Login -> Batch Home
  * - Top-right corner 'X' button to dismiss manually
  * - Automatic 5-second countdown timer that auto-closes if user doesn't click X
- * - Glowing 'JOIN NOW' button pointing to editable Telegram placeholder URL
+ * - Glowing 'JOIN NOW' button pointing to the Telegram channel set in the
+ *   Admin Panel (Website Settings → Telegram Join URL)
+ * - 🔧 FIX (v5): link configure hi na ho (ya placeholder ho) to popup khulta
+ *   hi nahi — pehle dead `t.me/YOUR_TELEGRAM_CHANNEL_HERE` button dikhta tha.
  */
 export default function TelegramPopup() {
   const { showTelegramPopup, closeTelegramPopup, config } = useApp();
@@ -35,6 +38,7 @@ export default function TelegramPopup() {
   }, [showTelegramPopup, totalMs, closeTelegramPopup]);
 
   if (!showTelegramPopup) return null;
+  if (!config.telegramJoinUrlConfigured) return null;
 
   const secondsLeft = Math.ceil(remainingMs / 1000);
   const progressPct = Math.max(0, Math.min(100, (remainingMs / totalMs) * 100));

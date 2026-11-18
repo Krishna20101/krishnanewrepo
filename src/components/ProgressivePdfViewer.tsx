@@ -110,16 +110,30 @@ export default function ProgressivePdfViewer({
           .GlobalWorkerOptions.workerSrc = "/pdf.worker.min.js";
         pdfjsRef.current = pdfjs;
 
+        // 🔒 SECURITY (CVE-2024-4367 / GHSA-wgrm-67xf-hhpq): pdf.js malicious
+        // PDF par arbitrary JavaScript chala sakta tha. `isEvalSupported:false`
+        // us eval/font path ko band karta hai — ye official mitigation hai.
+        // Hamare PDFs Telegram channel se aate hain = untrusted input.
+        const securityParams = {
+          isEvalSupported: false,
+          useSystemFonts: true,
+        };
+
         const params: Record<string, unknown> = data
-          ? { data }
+          ? { data, ...securityParams }
           : {
               url,
               httpHeaders: { "X-SHD-Client": "pdf-viewer" },
+              // NOTE: `withCredentials:false` hi rehne dein — PDF url Cloudflare
+              // Worker (cross-origin) ka bhi ho sakta hai, aur wahan wildcard
+              // CORS ke saath credentials browser block kar deta hai. Same-origin
+              // request naya guard `Sec-Fetch-Site` se hi allow kar leta hai.
               withCredentials: false,
               // 🔑 Progressive magic: sirf zaroorat ke bytes lao
               rangeChunkSize: 512 * 1024,
               disableAutoFetch: true,
               disableStream: false,
+              ...securityParams,
             };
 
         const task = (
@@ -159,7 +173,7 @@ export default function ProgressivePdfViewer({
         setLoadingDoc(false);
         const msg = err instanceof Error ? err.message : String(err);
         setFatalError(
-          `PDF load nahi ho paya (${msg.slice(0, 90)}). Retry dabayein ya offline save karke kholein.`
+          `Could not load the PDF (${msg.slice(0, 90)}). Please tap retry, or save it offline and open it again.`
         );
         onFallbackNeeded?.();
       }
@@ -470,7 +484,7 @@ export default function ProgressivePdfViewer({
         <div className="flex flex-1 flex-col items-center justify-center gap-3 p-8 text-center">
           <Loader2 className="h-9 w-9 animate-spin text-cyan-300" />
           <p className="text-xs font-black uppercase tracking-widest text-cyan-300">
-            Please wait, PDF ka pehla page load ho raha hai...
+            Please wait, loading the first page of the PDF…
           </p>
           {loadPct > 0 && (
             <div className="h-1.5 w-52 overflow-hidden rounded-full bg-white/10">
@@ -524,7 +538,7 @@ export default function ProgressivePdfViewer({
                   <div className="absolute inset-0 z-10 flex flex-col items-center justify-center gap-2 bg-[#0b1024]/85">
                     <Loader2 className="h-6 w-6 animate-spin text-cyan-300" />
                     <span className="text-[10px] font-bold text-cyan-200">
-                      Please wait, page {pageNum} load ho raha hai...
+                      Please wait, loading page {pageNum}…
                     </span>
                   </div>
                 )}

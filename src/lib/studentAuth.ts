@@ -6,6 +6,7 @@ import {
   ADMIN_COOKIE_NAME,
   verifyEncryptedAdminSession,
 } from "@/lib/adminAuth";
+import { getServerMasterSecret } from "@/lib/serverSecrets";
 import {
   getStudentAccount,
   saveStudentAccount,
@@ -31,9 +32,21 @@ import {
 export const STUDENT_COOKIE_NAME = "shd_student_token";
 export const STUDENT_SESSION_TTL_SEC = 7 * 24 * 60 * 60; // 7 days
 
-/** Per-process fallback (agar .env me kuch bhi set na ho) */
-const EPHEMERAL_SECRET = crypto.randomBytes(64).toString("hex");
-
+/**
+ * 🔒 FIX (v5): pehle last fallback ek PER-MODULE random secret tha
+ * (`crypto.randomBytes(64)`). Next.js dev me har route bundle ka apna module
+ * instance hota hai → /api/auth/login ne jis secret se cookie sign ki,
+ * /api/auth/session aur /api/batches use verify hi nahi kar pate the.
+ * Natija: login 200 OK + cookie set, phir har content API 401
+ * ("login ho gaya par kuch khul nahi raha" — silent loop, koi error nahi).
+ *
+ * Ab fallback `serverSecrets.getServerMasterSecret()` se aata hai:
+ *   • production me secret missing → ServerConfigError (loud, clear 503)
+ *   • development me → globalThis par STABLE random key (route-to-route same)
+ *
+ * Upar ke teen branches purane jaise hi hain (byte-identical), isliye pehle se
+ * logged-in students ki cookies invalid NAHI hoti.
+ */
 function getStudentSessionSecret(): string {
   const explicit = cleanEnv(process.env.STUDENT_SESSION_SECRET);
   if (explicit && explicit.length >= 16) return explicit;
@@ -50,7 +63,7 @@ function getStudentSessionSecret(): string {
       .digest("hex");
   }
 
-  return EPHEMERAL_SECRET;
+  return `student::${getServerMasterSecret()}`;
 }
 
 // ── Types ───────────────────────────────────────────────────────────────────
@@ -81,6 +94,18 @@ function signBody(data: string): string {
     .digest("base64url");
 }
 
+/**
+ * Cookie verify karte waqt secret missing hone par throw nahi karna —
+ * guard simply "not logged in" maan lega (401), 500 nahi.
+ */
+function trySignBody(data: string): string | null {
+  try {
+    return signBody(data);
+  } catch {
+    return null;
+  }
+}
+
 export function createStudentSession(
   input: Omit<StudentSessionPayload, "iat" | "exp">
 ): string {
@@ -105,7 +130,8 @@ export function verifyStudentSession(
     if (parts.length !== 3 || parts[0] !== "s1") return null;
 
     const [, body, signature] = parts;
-    const expected = signBody(body);
+    const expected = trySignBody(body);
+    if (!expected) return null;
 
     const a = Buffer.from(signature);
     const b = Buffer.from(expected);
@@ -158,52 +184,19 @@ export function studentCookieOptions() {
   };
 }
 
-// ── Login rate limiting (in-memory, per server instance) ────────────────────
-const MAX_FAILURES = 8;
-const LOCK_MS = 10 * 60 * 1000; // 10 min
-const WINDOW_MS = 10 * 60 * 1000;
-
-const loginAttempts = new Map<
-  string,
-  { count: number; windowStart: number; lockUntil: number }
->();
-
-export function checkStudentLoginRateLimit(ip: string): {
-  allowed: boolean;
-  retryAfterSec?: number;
-} {
-  const now = Date.now();
-  const rec = loginAttempts.get(ip);
-  if (!rec) return { allowed: true };
-
-  if (rec.lockUntil > now) {
-    return {
-      allowed: false,
-      retryAfterSec: Math.ceil((rec.lockUntil - now) / 1000),
-    };
-  }
-  if (now - rec.windowStart > WINDOW_MS) {
-    loginAttempts.delete(ip);
-  }
-  return { allowed: true };
-}
-
-export function recordStudentLoginFailure(ip: string): void {
-  const now = Date.now();
-  const rec = loginAttempts.get(ip);
-  const fresh =
-    !rec || now - rec.windowStart > WINDOW_MS || rec.lockUntil > 0
-      ? { count: 0, windowStart: now, lockUntil: 0 }
-      : rec;
-
-  const count = fresh.count + 1;
-  const lockUntil = count >= MAX_FAILURES ? now + LOCK_MS : 0;
-  loginAttempts.set(ip, { count, windowStart: fresh.windowStart, lockUntil });
-}
-
-export function clearStudentLoginAttempts(ip: string): void {
-  loginAttempts.delete(ip);
-}
+// ── Login rate limiting ─────────────────────────────────────────────────────
+/**
+ * 🔒 FIX (v5): pehle ye in-memory Map tha (`MAX_FAILURES = 8`, 10 min lock).
+ * Vercel serverless par har container ka apna Map hota hai + containers
+ * recycle hote rehte hain, isliye brute-force lock effectively kaam nahi karta
+ * tha. Ab counters Firebase RTDB me rehte hain (`rtStore.rateLimitHit`), yaani
+ * saare instances ek hi counter share karte hain.
+ *
+ * Same policy: 8 galat attempt / 10 minute window → 10 minute lock (per IP).
+ */
+export const STUDENT_LOGIN_MAX_FAILURES = 8;
+export const STUDENT_LOGIN_WINDOW_MS = 10 * 60 * 1000;
+export const STUDENT_LOGIN_LOCK_MS = 10 * 60 * 1000;
 
 // ── Login id normalisation ──────────────────────────────────────────────────
 /**
@@ -217,19 +210,19 @@ export function normaliseLoginId(raw: string): string {
 
 export function validateLoginId(loginId: string): string | null {
   if (!loginId) return "Please enter your Email / Mobile Number / User ID.";
-  if (loginId.length < 3) return "Email / User ID kam se kam 3 character ka ho.";
-  if (loginId.length > 120) return "Email / User ID bahut lamba hai.";
-  if (/\s{2,}/.test(loginId)) return "Email / User ID me double space nahi ho sakta.";
+  if (loginId.length < 3) return "Email / User ID must be at least 3 characters.";
+  if (loginId.length > 120) return "Email / User ID is too long.";
+  if (/\s{2,}/.test(loginId)) return "Email / User ID cannot contain double spaces.";
   if (!/^[^\s@]+(@[^\s@]+)?$|^[^\s]+$/.test(loginId)) {
-    return "Email / User ID valid nahi hai.";
+    return "Email / User ID is not valid.";
   }
   return null;
 }
 
 export function validatePassword(password: string): string | null {
   if (!password) return "Please enter your Password.";
-  if (password.length < 4) return "Password kam se kam 4 character ka ho.";
-  if (password.length > 200) return "Password bahut lamba hai.";
+  if (password.length < 4) return "Password must be at least 4 characters.";
+  if (password.length > 200) return "Password is too long.";
   return null;
 }
 
@@ -333,7 +326,7 @@ export async function loginOrRegisterStudent(
     } catch {
       return {
         ok: false,
-        error: "Account create nahi ho paya. Please thodi der baad try karein.",
+        error: "Could not create your account. Please try again in a moment.",
       };
     }
     return {
@@ -352,7 +345,7 @@ export async function loginOrRegisterStudent(
     return {
       ok: false,
       error:
-        "Galat password. Is Email / User ID ka account pehle se bana hua hai. Pehli baar login kar rahe hain to apna naya account bana lijiye (koi bhi email/ID chalega).",
+        "Wrong password. An account already exists for this Email / User ID. If this is your first login, use any new Email / User ID and your account will be created automatically.",
     };
   }
 

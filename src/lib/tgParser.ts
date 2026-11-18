@@ -1,5 +1,11 @@
 import "server-only";
 import { createTelegramMediaToken } from "./tgCrypto";
+import {
+  cleanCaptionText,
+  normalizeForMatch,
+  parseTelegramCaption,
+  similarity as fuzzySimilarity,
+} from "./tgMatch";
 import { extractYoutubeId } from "./youtube";
 import type { RawBatchFile, RawBatchNode } from "./batchEngine";
 
@@ -73,17 +79,22 @@ const SUBJECT_PATTERNS: Array<{ canonical: string; regex: RegExp }> = [
 /**
  * Removes extractor watermarks like `➳ᴹᴿ°Sittu࿐⁰³🦅`, `@channel`, file extensions, etc.,
  * while preserving Devanagari Hindi + English + numbers + punctuation cleanly!
+ *
+ * 🔒 v5: @username / t.me link stripping ab `src/lib/tgMatch.ts` (shared engine)
+ * se hoti hai — MANDATORY rule hai ki koi bhi @handle ya telegram link course
+ * tree, title, folder ya caption me kabhi na dikhe.
  */
 export function cleanWatermarkText(raw: string): string {
   if (!raw) return "";
   let s = raw;
 
-  // Strip "Extracted By: ..." / "Downloaded By: ..." / "@username"
+  // Strip "Extracted By: ..." / "Downloaded By: ..." / "@username" / t.me links
   s = s.replace(
     /(extracted|downloaded|uploaded|powered|shared|credit)\s*by\s*[:\-–—]?.*$/gim,
     ""
   );
-  s = s.replace(/@[a-zA-Z0-9_]{3,}/g, "");
+  s = s.replace(/(?:https?:\/\/)?(?:t\.me|telegram\.(?:me|org|dog))[:/][\w/+.-]+/gi, " ");
+  s = s.replace(/@[a-zA-Z0-9_]{3,}/g, " ");
 
   // Strip extractor crash logs that leak into captions, e.g.
   // "Error: 'utf-8' codec can't decode byte 0xe0 in position 6582: ..."
@@ -879,3 +890,76 @@ export function mergeTelegramItemsIntoExistingBatch(
 
   return { updatedBatch: cloned, matchedVideos, matchedPdfs };
 }
+
+
+// ============================================================================
+// 🔁 SYNC-TIME DEDUPE (v5)
+// ----------------------------------------------------------------------------
+// User rule: "kabhi-kabhi 2 channel me same video hoti hai (title thoda
+// aage-peeche) — ek hi choose karo, jo zyada match karta hai."
+//
+// Sync ke waqt hi duplicates hata dete hain taaki course tree me ek lecture
+// 2-3 baar na dikhe. Preference:
+//   1) jis caption me proper labels hain (Title:/Batch:/Topic:) — best quality
+//   2) badi file (adhura/low-quality copy chhoti hoti hai)
+//   3) purana message id (original upload)
+// ============================================================================
+function captionQualityScore(item: ScannedTelegramItem): number {
+  const parsed = parseTelegramCaption(item.caption || "", item.fileName || "");
+  let score = 0;
+  if (parsed.title) score += 2;
+  if (parsed.course) score += 2;
+  if (parsed.topic) score += 1;
+  if (parsed.index !== null) score += 1;
+  if (item.fileSize > 0) score += 1;
+  return score;
+}
+
+export function dedupeScannedItems(items: ScannedTelegramItem[]): {
+  items: ScannedTelegramItem[];
+  removedDuplicates: number;
+} {
+  const best = new Map<string, ScannedTelegramItem>();
+
+  for (const item of items) {
+    const parsed = parseTelegramCaption(item.caption || "", item.fileName || "");
+    const titleKey = normalizeForMatch(parsed.title || item.fileName || "").slice(0, 70);
+    if (!titleKey) continue;
+
+    const sizeMb = Math.round((item.fileSize || 0) / (1024 * 1024));
+    const durationBucket = Math.round((item.durationSec || 0) / 20);
+    const key = `${item.kind}|${titleKey}|${sizeMb}|${durationBucket}`;
+
+    const prev = best.get(key);
+    if (!prev) {
+      best.set(key, item);
+      continue;
+    }
+
+    const prevScore = captionQualityScore(prev);
+    const curScore = captionQualityScore(item);
+    if (
+      curScore > prevScore ||
+      (curScore === prevScore && (item.fileSize || 0) > (prev.fileSize || 0)) ||
+      (curScore === prevScore &&
+        (item.fileSize || 0) === (prev.fileSize || 0) &&
+        item.messageId < prev.messageId)
+    ) {
+      best.set(key, item);
+    }
+  }
+
+  const kept = new Set(Object.values(best).map((x) => x));
+  const out = items.filter((item) => kept.has(item));
+  return { items: out, removedDuplicates: Math.max(0, items.length - out.length) };
+}
+
+/**
+ * Fuzzy title compare (shared engine se) — admin "JSON Merge" matching me bhi
+ * use hota hai. Export isliye ki tests ise directly check kar sakein.
+ */
+export function titleSimilarity(a: string, b: string): number {
+  return fuzzySimilarity(a, b);
+}
+
+export { normalizeForMatch, cleanCaptionText };

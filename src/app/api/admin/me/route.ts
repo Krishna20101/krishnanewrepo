@@ -12,6 +12,7 @@ import {
   getFirebaseMode,
   getParsedFirebaseAdminConfig,
 } from "@/config/firebaseConfig";
+import { getWorkerSharedSecret } from "@/lib/serverSecrets";
 
 export const dynamic = "force-dynamic";
 
@@ -66,5 +67,11 @@ export async function GET(req: NextRequest) {
     },
     batches,
     settings,
+    /**
+     * 🔒 Cloudflare Worker ⇄ origin shared secret. Ye sirf admin ko dikhta hai —
+     * worker.js ke top par `WORKER_SHARED_SECRET` me paste karein, phir
+     * settings me `requireWorkerSecret` ON kar dein.
+     */
+    workerSecret: getWorkerSharedSecret(),
   });
 }

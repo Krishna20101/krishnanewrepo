@@ -358,10 +358,10 @@ export default function SmartVideoPlayer({
 
     const msg =
       code === 2
-        ? "Network problem — stream beech me ruka. Retry dabayein."
+        ? "Network problem — the stream stopped in between. Please tap retry."
         : code === 3
-        ? "Video decode error — file corrupt ho sakti hai. Retry dabayein."
-        : "Stream unavailable — Admin Panel me Telegram Bot Token / Session check karein.";
+        ? "Video decode error — the file may be corrupted. Please tap retry."
+        : "Stream unavailable — please check the Telegram Bot Token / Session in the Admin Panel.";
     setFatalError(msg);
     onError?.(msg);
   };
