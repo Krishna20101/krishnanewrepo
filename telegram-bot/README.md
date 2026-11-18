@@ -141,6 +141,34 @@ Rules jo bot **kabhi break nahi karta**:
 - Ek hi lecture 2 channels me mile → **sirf best match** (course match mandatory).
 - Har failure ka English message jata hai; kuch bhi "stuck" nahi dikhta.
 
+### 🛡️ Anti-theft (koi poora course utha na le)
+
+| Layer | Kahan | Default |
+|---|---|---|
+| Daily limit per user (rolling 24h) | **website + bot dono** | 12 videos |
+| Deep-link throttle per login | website | 15 links / 10 min |
+| Deep-link throttle per IP | website | 30 links / 10 min |
+| Pending (undelivered) links per user | website | 3 |
+| Same-video cooldown → **link reuse** (naya quota spend nahi) | website | 5 min |
+| **Single-use link** (`usedCount >= requestReuseLimit` → link mar jata hai) | bot | 1 use |
+| **Account binding** — jo pehla Telegram user link kholta hai, link usi ka | bot | on |
+| **Global circuit breaker** — poori site par 24h me max deliveries | bot + website | 500 |
+| Request TTL (deep-link expiry) | website + bot | 168 h |
+| Auto-delete delivered file | bot | 2 h |
+
+Sab knobs Admin Panel → **Telegram Bot Delivery → Anti-theft & fair use** se badalte
+hain (`globalDailyLimit`, `requestReuseLimit`, `requestCooldownMin`,
+`maxPendingPerUser`). Rate limits **database-backed** hain, isliye Vercel ke har
+container par same ginti chalti hai (in-memory Map wala purana bug nahi).
+
+Naye English messages jo is wajah se user ko dikh sakte hain:
+
+```
+🔐 This link belongs to another account.
+🔁 This link has already been used. Each link works only once…
+🚦 Delivery is temporarily full for today because of heavy traffic.
+```
+
 Error / limit messages:
 
 ```
@@ -261,6 +289,24 @@ docker run -d --name shdbot --restart unless-stopped \
 
 Test: website par koi lecture kholein → **Open Video in Telegram** → bot me
 `/start` → progress → video → 2 ghante baad auto-delete.
+
+### 🧹 Sab kuch ek button me delete karna ho
+
+Admin Panel → **Telegram Sync Studio** ke sabse neeche **Danger Zone — Remove
+everything that came from Telegram** card hai:
+
+1. **Scan now** dabayein (read-only) → dikhta hai kitne Telegram video/PDF links,
+   sync-created lectures, synced courses, group records aur pending requests hain,
+   aur kya-kya **protected** hai.
+2. Scope chunein (links strip / sync-created lectures / poore synced courses /
+   group registry / pending requests / Telegram embeds / bot user-quota reset).
+3. `DELETE` type karke confirm karein.
+
+**Kabhi delete nahi hota:** `data/batches/*.json` (original/real courses — file-backed
+course poora delete hi nahi ho sakta, sirf uske Telegram links strip hote hain),
+manually uploaded courses, YouTube links, student accounts, site settings aur bot
+configuration. Purge ke baad bina Telegram file wale lectures English
+"content unavailable — it will be uploaded soon" card dikhate hain.
 
 ---
 

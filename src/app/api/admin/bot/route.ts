@@ -3,6 +3,7 @@ import { isRequestAdminAuthorized } from "@/lib/adminAuth";
 import {
   getBotConfig,
   getBotStats,
+  getGlobalDeliveryQuota,
   listBotEvents,
   listBotTasks,
   listBotUsers,
@@ -31,10 +32,11 @@ function unauthorized() {
 export async function GET(req: NextRequest) {
   if (!isRequestAdminAuthorized(req)) return unauthorized();
 
-  const [stats, config, settings] = await Promise.all([
+  const [stats, config, settings, globalQuota] = await Promise.all([
     getBotStats(),
     getBotConfig(),
     getEffectiveSiteSettings(),
+    getGlobalDeliveryQuota().catch(() => null),
   ]);
 
   const limitParam = Number(req.nextUrl.searchParams.get("users") || 60);
@@ -61,6 +63,8 @@ export async function GET(req: NextRequest) {
      * worker.js me `WORKER_SHARED_SECRET` me paste karein.
      */
     workerSecret: getWorkerSharedSecret(),
+    /** 🛡️ site-wide 24h delivery usage (circuit breaker) */
+    globalQuota,
     users,
     tasks,
     events,
@@ -113,6 +117,20 @@ export async function POST(req: NextRequest) {
       }
       if (patch.botUsername !== undefined) {
         patch.botUsername = String(patch.botUsername || "").replace(/^@+/, "").replace(/[^A-Za-z0-9_]/g, "").slice(0, 32);
+      }
+
+      // 🛡️ anti-theft knobs (v6)
+      if (patch.globalDailyLimit !== undefined) {
+        patch.globalDailyLimit = Math.max(0, Math.min(1000000, Number(patch.globalDailyLimit) || 0));
+      }
+      if (patch.requestReuseLimit !== undefined) {
+        patch.requestReuseLimit = Math.max(1, Math.min(50, Number(patch.requestReuseLimit) || 1));
+      }
+      if (patch.requestCooldownMin !== undefined) {
+        patch.requestCooldownMin = Math.max(0, Math.min(1440, Number(patch.requestCooldownMin) || 0));
+      }
+      if (patch.maxPendingPerUser !== undefined) {
+        patch.maxPendingPerUser = Math.max(1, Math.min(100, Number(patch.maxPendingPerUser) || 3));
       }
 
       const config = await saveBotConfig(patch);

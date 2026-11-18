@@ -1267,6 +1267,84 @@ export async function saveCustomUploadedBatch(
   writeLocalStore(store);
 }
 
+/**
+ * 🧹 DB-ONLY batch override (v6) — `saveCustomUploadedBatch` jaisa hi hai, par
+ * `data/batches/*.json` FILE ko bilkul touch nahi karta.
+ *
+ * Telegram Purge ke liye zaroori: scraped/original course files (real data) ko
+ * disk par chhede bina, DB me ek cleaned override likh dete hain.
+ * `loadSingleRawBatch` / `loadAllRawBatches` custom DB batch ko file par
+ * priority dete hain, isliye override turant effective hota hai.
+ */
+export async function saveCustomBatchDbOnly(
+  batchId: string,
+  batchJson: Record<string, unknown>
+): Promise<void> {
+  invalidateServerCaches();
+  const id = String(batchId);
+  const safeId = safeRtdbKey(id);
+
+  const payload = {
+    id,
+    serializedJson: JSON.stringify(batchJson),
+    updatedAt: new Date().toISOString(),
+  };
+
+  const rtdb = getAdminRtdb();
+  if (rtdb) {
+    try {
+      await withTimeout(rtdb.ref(`custom_batches/${safeId}`).set(payload), 8000);
+      return;
+    } catch (err) {
+      lastDbError = err instanceof Error ? err.message : String(err);
+    }
+  }
+
+  const webDb = getServerWebRtdb();
+  if (webDb) {
+    try {
+      await withTimeout(
+        webSet(webRef(webDb, `custom_batches/${safeId}`), payload),
+        8000
+      );
+      return;
+    } catch (err) {
+      lastDbError = err instanceof Error ? err.message : String(err);
+    }
+  }
+
+  const store = readLocalStore();
+  store.custom_batches[id] = batchJson;
+  writeLocalStore(store);
+}
+
+/**
+ * Kya ye batch disk par `data/batches/*.json` file se aata hai?
+ * Telegram Purge me file-backed (original/real) courses ko KABHI poora delete
+ * nahi karte — sirf unke Telegram links strip karte hain.
+ */
+export function isFileBackedBatch(batchId: string): boolean {
+  const id = String(batchId || "").trim();
+  if (!id) return false;
+  try {
+    const dir = path.join(process.cwd(), "data", "batches");
+    if (!fs.existsSync(dir)) return false;
+    for (const f of fs.readdirSync(dir).filter((x) => x.endsWith(".json"))) {
+      const fidMatch = f.replace(/\.json$/i, "").match(/_(\d+)$/);
+      if (fidMatch && fidMatch[1] === id) return true;
+      try {
+        const parsed = JSON.parse(fs.readFileSync(path.join(dir, f), "utf8"));
+        if (String(parsed.id ?? "") === id) return true;
+      } catch {
+        // ignore malformed file
+      }
+    }
+  } catch {
+    // ignore
+  }
+  return false;
+}
+
 export async function getDeletedBatchIds(): Promise<Set<string>> {
   const cached = getCached<string[]>("deleted_batch_ids");
   if (cached) return new Set(cached);

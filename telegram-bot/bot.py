@@ -171,6 +171,22 @@ MSG_GENERIC_ERROR = (
 MSG_ALREADY_RUNNING = "⏳ This video is already being prepared. Please wait…"
 MSG_BANNED = "⛔ Your access has been blocked. Contact @{contact} for help."
 
+# ── 🛡️ ANTI-THEFT messages (v6) ────────────────────────────────────────────
+MSG_LINK_OWNER = (
+    "🔐 This link belongs to another account.\n"
+    "Please open the lecture from the website with your own login and tap "
+    "▶ OPEN IN TELEGRAM to get your own link."
+)
+MSG_LINK_USED = (
+    "🔁 This link has already been used.\n"
+    "Each link works only once. Open the lecture on the website again and tap "
+    "▶ OPEN IN TELEGRAM for a fresh link."
+)
+MSG_GLOBAL_LIMIT = (
+    "🚦 Delivery is temporarily full for today because of heavy traffic.\n"
+    "Please try again after some time."
+)
+
 
 # ─────────────────────────────────────────────────────────────────────────────
 # SMALL HELPERS
@@ -753,6 +769,37 @@ class DeliveryBot:
             await event.reply(self._fmt(MSG_NO_MEDIA))
             return
 
+        # 🛡️ ANTI-THEFT GATE: global breaker → single-use → account binding
+        gate_reason = ""
+        if request_id and request_id != "find":
+            try:
+                videos_24h = int((self.store.stats() or {}).get("videosLast24h") or 0)
+            except Exception:  # noqa: BLE001
+                videos_24h = 0
+            allowed, gate_reason = request_gate(request, uid, self.cfg, videos_24h)
+            if not allowed:
+                msg = {
+                    "global_limit": MSG_GLOBAL_LIMIT,
+                    "used": MSG_LINK_USED,
+                    "owner": MSG_LINK_OWNER,
+                }.get(gate_reason, MSG_LINK_USED)
+                await event.reply(self._fmt(msg))
+                self.store.log_event(
+                    "blocked_%s" % gate_reason, uid=uid, requestId=request_id
+                )
+                return
+
+            # link ko is Telegram account par BIND kar do (pehli baar)
+            if not int(request.get("boundTgUid") or 0):
+                request["boundTgUid"] = int(uid)
+                try:
+                    self.store.set_request(
+                        request_id,
+                        {**_serializable_request(request), "boundTgUid": int(uid)},
+                    )
+                except Exception:  # noqa: BLE001
+                    pass
+
         quota = self.store.quota_status(uid)
         if quota["remaining"] <= 0:
             await event.reply(
@@ -917,17 +964,33 @@ class DeliveryBot:
             quota = self.store.consume_quota(uid)
 
             # request record par delivery mark (website admin panel ko dikhe)
+            # 🛡️ usedCount badhao — reuseLimit pahunchte hi link MAR jata hai
             if request_id and request_id != "find":
-                self.store.set_request(
-                    request_id,
-                    {
-                        **{k: v for k, v in request.items() if k != "message"},
-                        "deliveredTo": int(uid),
-                        "deliveredAt": int(time.time() * 1000),
-                        "deleteAt": delete_at,
-                        "deliveryMode": mode,
-                    },
-                )
+                try:
+                    reuse_limit = max(1, int(self.cfg.get("requestReuseLimit") or 1))
+                except (TypeError, ValueError):
+                    reuse_limit = 1
+                try:
+                    used_count = int(request.get("usedCount") or 0) + 1
+                except (TypeError, ValueError):
+                    used_count = 1
+
+                if used_count >= reuse_limit:
+                    # single-use: record hata do → link dobara kaam nahi karega
+                    self.store.delete_request(request_id)
+                else:
+                    self.store.set_request(
+                        request_id,
+                        {
+                            **_serializable_request(request),
+                            "deliveredTo": int(uid),
+                            "deliveredAt": int(time.time() * 1000),
+                            "deleteAt": delete_at,
+                            "deliveryMode": mode,
+                            "usedCount": used_count,
+                            "usedAt": int(time.time() * 1000),
+                        },
+                    )
 
             self.store.log_event(
                 "delivered",
@@ -1359,6 +1422,57 @@ def _video_attributes(message: Any, file_name: str) -> List[Any]:
 
 
 # ─────────────────────────────────────────────────────────────────────────────
+# 🛡️ ANTI-THEFT GATE (v6)
+# ----------------------------------------------------------------------------
+# Website par daily limit thi, par koi banda 15 deep-link bana kar unhe alag-alag
+# Telegram accounts me khol sakta tha → poora course chori. Ab:
+#   1) GLOBAL circuit breaker : poori site par 24h me N video se zyada nahi
+#   2) SINGLE-USE link        : usedCount >= requestReuseLimit → mana
+#   3) ACCOUNT BINDING        : jo pehla Telegram user link kholta hai, link
+#                               usi ka; dusre user ko "belongs to another account"
+# Pure function hai taaki offline self-test me verify ho sake.
+# ─────────────────────────────────────────────────────────────────────────────
+def request_gate(
+    request: Dict[str, Any],
+    uid: int,
+    cfg: Dict[str, Any],
+    videos_last_24h: int = 0,
+) -> Tuple[bool, str]:
+    """(allowed, reason). reason ∈ {"", "global_limit", "used", "owner"}."""
+    try:
+        glimit = int(cfg.get("globalDailyLimit") or 0)
+    except (TypeError, ValueError):
+        glimit = 0
+    if glimit > 0 and int(videos_last_24h or 0) >= glimit:
+        return False, "global_limit"
+
+    try:
+        reuse = max(1, int(cfg.get("requestReuseLimit") or 1))
+    except (TypeError, ValueError):
+        reuse = 1
+    try:
+        used = int(request.get("usedCount") or 0)
+    except (TypeError, ValueError):
+        used = 0
+    if used >= reuse:
+        return False, "used"
+
+    try:
+        bound = int(request.get("boundTgUid") or 0)
+    except (TypeError, ValueError):
+        bound = 0
+    if bound and bound != int(uid or 0):
+        return False, "owner"
+
+    return True, ""
+
+
+def _serializable_request(request: Dict[str, Any]) -> Dict[str, Any]:
+    """`message` (Telethon object) jaisi non-JSON cheezein hata kar copy."""
+    return {k: v for k, v in (request or {}).items() if k != "message"}
+
+
+# ─────────────────────────────────────────────────────────────────────────────
 # CLI COMMANDS
 # ─────────────────────────────────────────────────────────────────────────────
 def cmd_login() -> int:
@@ -1628,6 +1742,28 @@ def cmd_selftest() -> int:
         _topic_path({"folderPath": ["Chemistry", "Solid State"], "topic": "Solid State"}),
     )
     check("@ blocked in caption", "@" not in build_delivery_caption("Title @leak", "", "", "krishna84").replace("@krishna84", ""))
+
+    print("\n── 🛡️ anti-theft gate (v6) ─────────────────────────────────────")
+    gate_cfg = {**DEFAULT_CONFIG, "globalDailyLimit": 100, "requestReuseLimit": 1}
+    fresh = {"title": "Solid State", "usedCount": 0, "boundTgUid": 0}
+    ok, why = request_gate(fresh, 555, gate_cfg, videos_last_24h=10)
+    check("fresh link allowed", ok and why == "", why)
+    ok, why = request_gate({**fresh, "usedCount": 1}, 555, gate_cfg)
+    check("used link rejected", (not ok) and why == "used", why)
+    ok, why = request_gate({**fresh, "boundTgUid": 555}, 555, gate_cfg)
+    check("owner can reuse bound link", ok and why == "", why)
+    ok, why = request_gate({**fresh, "boundTgUid": 555}, 999, gate_cfg)
+    check("other account blocked", (not ok) and why == "owner", why)
+    ok, why = request_gate(fresh, 555, gate_cfg, videos_last_24h=100)
+    check("global breaker trips", (not ok) and why == "global_limit", why)
+    ok, why = request_gate(fresh, 555, {**gate_cfg, "globalDailyLimit": 0}, videos_last_24h=99999)
+    check("global breaker off = allowed", ok and why == "", why)
+    ok, why = request_gate({"usedCount": "2", "boundTgUid": "7"}, 7, {**gate_cfg, "requestReuseLimit": 2})
+    check("string fields handled", (not ok) and why == "used", why)
+    check(
+        "message object stripped",
+        "message" not in _serializable_request({"title": "x", "message": object()}),
+    )
 
     print("\n── helpers ─────────────────────────────────────────────────────")
     check("human_bytes", human_bytes(1536 * 1024) == "1.5 MB", human_bytes(1536 * 1024))

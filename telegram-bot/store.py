@@ -73,6 +73,17 @@ DEFAULT_CONFIG: Dict[str, Any] = {
     "pauseMessage": "Service is paused for maintenance. Please try again later.",
     #: Max file size bot upload karega (Telegram bot limit = 2 GB)
     "maxUploadMb": 2000,
+
+    # ── 🛡️ ANTI-THEFT (v6) — koi scraper poora course na utha le ───────────
+    #: Poori site ka 24h circuit breaker (0 = off). Isse zyada video ek din me
+    #: deliver hone par bot naye requests mana kar deta hai.
+    "globalDailyLimit": 500,
+    #: Ek deep-link kitni baar use ho sakta hai (1 = single-use).
+    "requestReuseLimit": 1,
+    #: Same user + same video cooldown (minutes) — website side reuse karta hai.
+    "requestCooldownMin": 5,
+    #: Ek user ke kitne PENDING (undelivered) links allow hain.
+    "maxPendingPerUser": 3,
 }
 
 STATE_PREFIX = "bot_state"

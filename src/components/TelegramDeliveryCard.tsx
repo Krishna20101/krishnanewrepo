@@ -84,6 +84,13 @@ export default function TelegramDeliveryCard({
   const [error, setError] = useState("");
   const [copied, setCopied] = useState(false);
   const [notice, setNotice] = useState("");
+  /** 🛡️ server se aaya hua daily quota — user ko dikhta hai ki kitne bache hain */
+  const [quota, setQuota] = useState<{
+    limit: number;
+    used: number;
+    remaining: number;
+    resetInSec: number;
+  } | null>(null);
   const busyRef = useRef(false);
 
   useEffect(() => {
@@ -119,15 +126,34 @@ export default function TelegramDeliveryCard({
             data?.error || "Could not create your Telegram link. Please try again."
           )
         );
+        // 🛡️ limit/throttle wali response me bhi quota info aata hai
+        if (data?.quota && typeof data.quota === "object") {
+          setQuota({
+            limit: Number(data.quota.limit || dailyLimit),
+            used: Number(data.quota.used || 0),
+            remaining: Number(data.quota.remaining || 0),
+            resetInSec: Number(data.quota.resetInSec || 0),
+          });
+        }
         return;
       }
 
       setDeepLink(String(data.deepLink));
       setStatus("ready");
 
-      if (data.isYoutubeOnly) {
+      // 🛡️ quota server se aata hai — "X of Y left today" dikhate hain
+      if (data.quota && typeof data.quota === "object") {
+        setQuota({
+          limit: Number(data.quota.limit || dailyLimit),
+          used: Number(data.quota.used || 0),
+          remaining: Number(data.quota.remaining || 0),
+          resetInSec: Number(data.quota.resetInSec || 0),
+        });
+      }
+
+      if (data.reused) {
         setNotice(
-          "This lecture is a YouTube class — it plays inside the website. No Telegram delivery needed."
+          "This is the same link you created a few minutes ago — it works only once, so open it in Telegram now."
         );
       }
 
@@ -290,6 +316,35 @@ export default function TelegramDeliveryCard({
             </div>
           )}
         </div>
+
+        {/* ── 🛡️ DAILY QUOTA (anti-theft) ───────────────────────────────── */}
+        {quota ? (
+          <div className="flex w-full items-center justify-between gap-3 rounded-2xl border border-cyan-400/25 bg-cyan-500/[0.07] px-3.5 py-2.5">
+            <span className="flex items-center gap-2 text-[11px] font-bold text-cyan-100">
+              <ShieldCheck className="h-3.5 w-3.5 shrink-0 text-cyan-300" />
+              {quota.remaining > 0
+                ? `${quota.remaining} of ${quota.limit} videos left today`
+                : `Daily limit reached (${quota.used}/${quota.limit})`}
+            </span>
+            {quota.remaining <= 0 && quota.resetInSec > 0 ? (
+              <span className="shrink-0 text-[10px] font-black uppercase tracking-wider text-amber-200">
+                resets in {Math.max(1, Math.ceil(quota.resetInSec / 3600))}h
+              </span>
+            ) : (
+              <span className="shrink-0 text-[10px] font-semibold text-slate-400">
+                used {quota.used}/{quota.limit}
+              </span>
+            )}
+          </div>
+        ) : (
+          <div className="flex w-full items-center gap-2 rounded-2xl border border-white/10 bg-white/[0.03] px-3.5 py-2.5">
+            <ShieldCheck className="h-3.5 w-3.5 shrink-0 text-emerald-300" />
+            <span className="text-[11px] font-semibold text-slate-300">
+              Fair-use limit: {dailyLimit} videos every 24 hours • each link works
+              once, for your Telegram account only
+            </span>
+          </div>
+        )}
 
         {/* ── LECTURE META ──────────────────────────────────────────────── */}
         <div className="w-full rounded-2xl border border-white/10 bg-[#090d24]/85 p-3.5">

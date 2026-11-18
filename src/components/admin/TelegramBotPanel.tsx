@@ -52,6 +52,11 @@ interface BotConfigView {
   maxDialogs?: number;
   maxMessagesPerChat?: number;
   heartbeatAt?: number;
+  /** 🛡️ anti-theft (v6) */
+  globalDailyLimit?: number;
+  requestReuseLimit?: number;
+  requestCooldownMin?: number;
+  maxPendingPerUser?: number;
 }
 
 interface BotStatsView {
@@ -225,6 +230,18 @@ export default function TelegramBotPanel() {
   const [maxMessagesPerChat, setMaxMessagesPerChat] = useState(40);
   const [requestTtlHours, setRequestTtlHours] = useState(168);
 
+  // 🛡️ anti-theft (v6)
+  const [globalDailyLimit, setGlobalDailyLimit] = useState(500);
+  const [requestReuseLimit, setRequestReuseLimit] = useState(1);
+  const [requestCooldownMin, setRequestCooldownMin] = useState(5);
+  const [maxPendingPerUser, setMaxPendingPerUser] = useState(3);
+  const [globalQuota, setGlobalQuota] = useState<{
+    limit: number;
+    used: number;
+    remaining: number;
+    tripped: boolean;
+  } | null>(null);
+
   // worker secret enforcement
   const [requireWorkerSecret, setRequireWorkerSecret] = useState(false);
 
@@ -261,6 +278,13 @@ export default function TelegramBotPanel() {
       setMaxDialogs(Number(cfg.maxDialogs || 60) || 60);
       setMaxMessagesPerChat(Number(cfg.maxMessagesPerChat || 40) || 40);
       setRequestTtlHours(Number(cfg.requestTtlHours || 168) || 168);
+      setGlobalDailyLimit(Number(cfg.globalDailyLimit ?? 500) || 0);
+      setRequestReuseLimit(Math.max(1, Number(cfg.requestReuseLimit ?? 1) || 1));
+      setRequestCooldownMin(Number(cfg.requestCooldownMin ?? 5) || 0);
+      setMaxPendingPerUser(Math.max(1, Number(cfg.maxPendingPerUser ?? 3) || 3));
+      setGlobalQuota(
+        (json as { globalQuota?: typeof globalQuota }).globalQuota || null
+      );
       setRequireWorkerSecret(Boolean(st.requireWorkerSecret));
     } catch (err) {
       setError(err instanceof Error ? err.message : "Network error while loading bot panel.");
@@ -317,6 +341,10 @@ export default function TelegramBotPanel() {
           maxDialogs: Math.max(5, Math.round(maxDialogs) || 60),
           maxMessagesPerChat: Math.max(5, Math.round(maxMessagesPerChat) || 40),
           requestTtlHours: Math.max(1, Math.round(requestTtlHours) || 168),
+          globalDailyLimit: Math.max(0, Math.round(globalDailyLimit) || 0),
+          requestReuseLimit: Math.max(1, Math.round(requestReuseLimit) || 1),
+          requestCooldownMin: Math.max(0, Math.round(requestCooldownMin) || 0),
+          maxPendingPerUser: Math.max(1, Math.round(maxPendingPerUser) || 3),
         },
       },
       "save-config"
@@ -326,7 +354,7 @@ export default function TelegramBotPanel() {
       setNotice("Bot configuration saved. The bot picks this up within ~30 seconds.");
       await load();
     }
-  }, [post, load, mode, botUsername, dailyLimit, autoDeleteHours, creditUsername, contactUsername, deliveryMode, paused, maxDialogs, maxMessagesPerChat, requestTtlHours]);
+  }, [post, load, mode, botUsername, dailyLimit, autoDeleteHours, creditUsername, contactUsername, deliveryMode, paused, maxDialogs, maxMessagesPerChat, requestTtlHours, globalDailyLimit, requestReuseLimit, requestCooldownMin, maxPendingPerUser]);
 
   const toggleRequireWorkerSecret = useCallback(
     async (next: boolean) => {
@@ -717,6 +745,136 @@ export default function TelegramBotPanel() {
           >
             {saving ? <Loader2 className="h-4 w-4 animate-spin" /> : <Save className="h-4 w-4" />}
             Save bot configuration
+          </button>
+        </div>
+      </div>
+
+      {/* ────────────────────── 🛡️ anti-theft / fair use ──────────────────── */}
+      <div className="glass-card rounded-3xl border border-emerald-400/25 p-4 sm:p-5">
+        <div className="flex flex-wrap items-start justify-between gap-3">
+          <div>
+            <h3 className="flex items-center gap-2 text-sm font-black uppercase tracking-wider text-white">
+              <ShieldCheck className="h-4 w-4 text-emerald-300" />
+              Anti-theft &amp; fair use
+            </h3>
+            <p className="mt-2 max-w-3xl text-[11px] leading-relaxed text-slate-400">
+              Stops anyone from scraping the whole course. Each deep link is
+              single-use, binds to the first Telegram account that opens it, and
+              the website enforces the same daily limit as the bot (plus its own
+              per-user and per-IP throttles). The global breaker caps total
+              videos delivered per 24h across the entire site.
+            </p>
+          </div>
+          {globalQuota ? (
+            <div
+              className={`rounded-2xl border px-3.5 py-2.5 text-right ${
+                globalQuota.tripped
+                  ? "border-rose-400/40 bg-rose-500/10"
+                  : "border-emerald-400/30 bg-emerald-500/10"
+              }`}
+            >
+              <p className="text-[10px] font-black uppercase tracking-widest text-slate-400">
+                Site usage (24h)
+              </p>
+              <p
+                className={`text-lg font-black ${
+                  globalQuota.tripped ? "text-rose-200" : "text-emerald-200"
+                }`}
+              >
+                {globalQuota.used}
+                {globalQuota.limit > 0 ? ` / ${globalQuota.limit}` : ""}
+              </p>
+              <p className="text-[10px] font-bold uppercase tracking-wider text-slate-400">
+                {globalQuota.tripped
+                  ? "breaker TRIPPED"
+                  : globalQuota.limit > 0
+                    ? `${globalQuota.remaining} left`
+                    : "breaker off"}
+              </p>
+            </div>
+          ) : null}
+        </div>
+
+        <div className="mt-5 grid grid-cols-1 gap-4 md:grid-cols-2 xl:grid-cols-4">
+          <Field
+            label="Global videos / 24h (whole site)"
+            hint="Circuit breaker. 0 = off. Set it a little above your real daily traffic so a scraper cannot drain everything."
+          >
+            <input
+              className={inputCls}
+              type="number"
+              min={0}
+              max={1000000}
+              value={globalDailyLimit}
+              onChange={(e) => setGlobalDailyLimit(Number(e.target.value) || 0)}
+            />
+          </Field>
+
+          <Field
+            label="Uses per link"
+            hint="1 = single-use deep link (recommended). The bot deletes the request after delivery."
+          >
+            <input
+              className={inputCls}
+              type="number"
+              min={1}
+              max={50}
+              value={requestReuseLimit}
+              onChange={(e) => setRequestReuseLimit(Number(e.target.value) || 1)}
+            />
+          </Field>
+
+          <Field
+            label="Same-video cooldown (minutes)"
+            hint="Re-tapping the same lecture reuses the existing link instead of creating a new one and spending quota twice."
+          >
+            <input
+              className={inputCls}
+              type="number"
+              min={0}
+              max={1440}
+              value={requestCooldownMin}
+              onChange={(e) => setRequestCooldownMin(Number(e.target.value) || 0)}
+            />
+          </Field>
+
+          <Field
+            label="Max pending links per user"
+            hint="How many undelivered links one user can hold at once. Stops bulk link farming."
+          >
+            <input
+              className={inputCls}
+              type="number"
+              min={1}
+              max={100}
+              value={maxPendingPerUser}
+              onChange={(e) => setMaxPendingPerUser(Number(e.target.value) || 3)}
+            />
+          </Field>
+        </div>
+
+        <div className="mt-4 grid grid-cols-1 gap-2 text-[11px] font-semibold text-slate-400 sm:grid-cols-2">
+          <p className="rounded-2xl border border-white/10 bg-white/[0.03] px-3.5 py-2.5">
+            <span className="text-emerald-300">Built-in throttles:</span> 15 links
+            / 10 min per login and 30 / 10 min per IP, both DB-backed so they
+            hold across every serverless container.
+          </p>
+          <p className="rounded-2xl border border-white/10 bg-white/[0.03] px-3.5 py-2.5">
+            <span className="text-emerald-300">Binding:</span> the first Telegram
+            account to open a link owns it; anyone else gets “This link belongs
+            to another account.”
+          </p>
+        </div>
+
+        <div className="mt-4 flex justify-end">
+          <button
+            type="button"
+            onClick={() => void saveConfig()}
+            disabled={saving || Boolean(busyAction)}
+            className="inline-flex items-center gap-2 rounded-2xl border border-emerald-400/40 bg-emerald-500/15 px-5 py-3 text-xs font-black uppercase tracking-widest text-emerald-100 transition hover:bg-emerald-500/25 disabled:opacity-50"
+          >
+            {saving ? <Loader2 className="h-4 w-4 animate-spin" /> : <Save className="h-4 w-4" />}
+            Save anti-theft settings
           </button>
         </div>
       </div>

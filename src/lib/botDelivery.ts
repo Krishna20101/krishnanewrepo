@@ -39,6 +39,17 @@ export interface BotConfig {
   paused: boolean;
   pauseMessage: string;
   maxUploadMb: number;
+
+  // ── 🛡️ ANTI-THEFT (v6) ─────────────────────────────────────────────────
+  /** Poori site ka 24h circuit breaker: itne video deliver hone ke baad
+   *  naye deep-link banna band (0 = bandh/off). Scraping rokne ke liye. */
+  globalDailyLimit: number;
+  /** Ek deep-link kitni baar use ho sakta hai (1 = single-use). */
+  requestReuseLimit: number;
+  /** Same user + same video ke liye cooldown (minutes) — repeat flooding rokta hai. */
+  requestCooldownMin: number;
+  /** Ek user ek time me kitne PENDING (undelivered) request rakh sakta hai. */
+  maxPendingPerUser: number;
 }
 
 export const DEFAULT_BOT_CONFIG: BotConfig = {
@@ -57,6 +68,12 @@ export const DEFAULT_BOT_CONFIG: BotConfig = {
   paused: false,
   pauseMessage: "Service is paused for maintenance. Please try again later.",
   maxUploadMb: 2000,
+
+  // 🛡️ defaults: 500 video/site/24h, single-use link, 5 min cooldown, 3 pending
+  globalDailyLimit: 500,
+  requestReuseLimit: 1,
+  requestCooldownMin: 5,
+  maxPendingPerUser: 3,
 };
 
 export interface TelegramRequestRecord {
@@ -82,6 +99,18 @@ export interface TelegramRequestRecord {
   deliveredAt?: number;
   deleteAt?: number;
   deliveryMode?: string;
+
+  // ── 🛡️ ANTI-THEFT (v6) ─────────────────────────────────────────────────
+  /** Jo pehla Telegram user ye link kholta hai, link usi ka ho jata hai.
+   *  Dusre user ko bot mana kar deta hai ("belongs to another account"). */
+  boundTgUid?: number;
+  /** Kitni baar deliver ho chuka (requestReuseLimit se compare hota hai). */
+  usedCount?: number;
+  usedAt?: number;
+  /** Request banane wala IP (audit / abuse trace). */
+  ip?: string;
+  /** Website-side daily quota consume hua ya nahi. */
+  quotaConsumed?: boolean;
 }
 
 export interface BotUserRow {
@@ -200,6 +229,8 @@ export interface CreateTelegramRequestInput {
   tgVideoToken?: string;
   youtubeUrl?: string;
   fileSize?: number;
+  /** 🛡️ abuse trace: kis IP se deep-link bana */
+  ip?: string;
 }
 
 export interface CreateTelegramRequestResult {
@@ -246,6 +277,11 @@ export async function createTelegramRequest(
     youtubeUrl: String(input.youtubeUrl || ""),
     part: null,
     createdAt: Date.now(),
+    // 🛡️ anti-theft: single-use + ek hi Telegram account par bind (bot bharta hai)
+    ip: String(input.ip || "").slice(0, 64),
+    boundTgUid: 0,
+    usedCount: 0,
+    quotaConsumed: true,
   };
 
   const requestId = makeRequestId();
@@ -421,4 +457,204 @@ export async function syncSettingsToBotConfig(
     contactUsername: String(settings.contactUsername || DEFAULT_BOT_CONFIG.contactUsername),
     botUsername: String(settings.telegramBotUsername || "").replace(/^@+/, ""),
   });
+}
+
+// ============================================================================
+// 🛡️ ANTI-THEFT QUOTA LAYER (v6)
+// ----------------------------------------------------------------------------
+// Pehle daily limit SIRF bot side (Telegram user id) par lagti thi. Matlab koi
+// bhi banda website par 40 deep-link/10min bana kar unhe alag-alag Telegram
+// accounts me khol sakta tha → poora course chori ho jata.
+//
+// Ab website bhi wahi 12/24h limit enforce karti hai (login uid ke hisaab se),
+// deep-link SINGLE-USE hota hai, ek Telegram account par BIND ho jata hai, aur
+// site-wide 24h circuit breaker bhi hai.
+//
+// Paths (python bot ke saath shared):
+//   web_quota/<safeUid>            → { recent:[ts], pending:{<videoId>:{id,at}} }
+//   bot_state/users/<tgUid>        → bot ka apna quota (unchanged)
+//   tg_requests/<id>               → record (+ boundTgUid / usedCount)
+// ============================================================================
+
+export const WEB_QUOTA_PREFIX = "web_quota";
+
+interface WebQuotaRow {
+  recent?: number[];
+  pending?: Record<string, { id: string; at: number }>;
+}
+
+function safeUid(uid: string): string {
+  return String(uid || "anon").replace(/[^A-Za-z0-9_-]/g, "_").slice(0, 64) || "anon";
+}
+
+export interface WebQuotaStatus {
+  limit: number;
+  used: number;
+  remaining: number;
+  resetInSec: number;
+  windowHours: number;
+}
+
+/** Login-uid ka rolling 24h usage (deep-link banane ka, delivery ka nahi). */
+export async function getWebRequestQuota(uid: string): Promise<WebQuotaStatus> {
+  const cfg = await getBotConfig();
+  const settings = await getEffectiveSiteSettings();
+  const limit = Number(cfg.dailyLimit || settings.dailyVideoLimit || 12);
+  const windowHours = Number(cfg.quotaWindowHours || 24);
+  const windowMs = windowHours * 3600 * 1000;
+  const now = Date.now();
+
+  const row = (await rtGet<WebQuotaRow>(
+    `${WEB_QUOTA_PREFIX}/${safeUid(uid)}`,
+    5000
+  )) || {};
+
+  const fresh = (row.recent || []).map(Number).filter((t) => t && now - t <= windowMs);
+  const used = fresh.length;
+  let resetInSec = 0;
+  if (fresh.length && used >= limit) {
+    resetInSec = Math.max(0, Math.round((windowMs - (now - Math.min(...fresh))) / 1000));
+  }
+
+  return {
+    limit,
+    used,
+    remaining: Math.max(0, limit - used),
+    resetInSec,
+    windowHours,
+  };
+}
+
+/** Deep-link banne par quota consume + pending entry. */
+export async function consumeWebRequestQuota(
+  uid: string,
+  videoId: string,
+  requestId: string
+): Promise<WebQuotaStatus> {
+  const cfg = await getBotConfig();
+  const windowMs = Number(cfg.quotaWindowHours || 24) * 3600 * 1000;
+  const now = Date.now();
+  const key = `${WEB_QUOTA_PREFIX}/${safeUid(uid)}`;
+  const row = (await rtGet<WebQuotaRow>(key, 5000)) || {};
+
+  const fresh = (row.recent || []).map(Number).filter((t) => t && now - t <= windowMs);
+  fresh.push(now);
+
+  const pending = { ...(row.pending || {}) };
+  pending[String(videoId)] = { id: requestId, at: now };
+  // purane pending entries (TTL se bade) hata do
+  const ttlMs = Number(cfg.requestTtlHours || 168) * 3600 * 1000;
+  for (const [k, v] of Object.entries(pending)) {
+    if (!v || now - Number(v.at || 0) > ttlMs) delete pending[k];
+  }
+
+  await rtSet(key, { recent: fresh.slice(-80), pending }, 6000);
+  return getWebRequestQuota(uid);
+}
+
+/**
+ * Same user ne same video ke liye abhi-abhi link banaya ho to NAYA record
+ * banane ke bajaye wahi purana (single-use, unbound) link wapas karo.
+ * Isse record flooding aur quota double-spend dono rukte hain.
+ */
+export async function findReusableRequest(
+  uid: string,
+  videoId: string
+): Promise<{ requestId: string; record: TelegramRequestRecord } | null> {
+  const cfg = await getBotConfig();
+  const row = (await rtGet<WebQuotaRow>(
+    `${WEB_QUOTA_PREFIX}/${safeUid(uid)}`,
+    5000
+  )) || {};
+  const entry = row.pending?.[String(videoId)];
+  if (!entry?.id) return null;
+
+  const cooldownMs = Number(cfg.requestCooldownMin || 5) * 60 * 1000;
+  if (cooldownMs > 0 && Date.now() - Number(entry.at || 0) < cooldownMs) {
+    // cooldown ke andar: purana link hi dobara use hoga (naya nahi banega)
+  }
+
+  const record = await getTelegramRequest(entry.id);
+  if (!record) return null;
+
+  const reuseLimit = Math.max(1, Number(cfg.requestReuseLimit || 1));
+  if (Number(record.usedCount || 0) >= reuseLimit) return null; // already used
+  if (record.boundTgUid && Number(record.deliveredTo || 0) > 0) return null;
+
+  return { requestId: entry.id, record };
+}
+
+/** Site-wide 24h deliveries (bot ke user rows se) — circuit breaker ke liye. */
+export async function getGlobalDeliveries24h(): Promise<number> {
+  const cfg = await getBotConfig();
+  const windowMs = Number(cfg.quotaWindowHours || 24) * 3600 * 1000;
+  const now = Date.now();
+  const users = await rtChildren<BotUserRow>(`${BOT_STATE_PREFIX}/users`, 8000);
+  let total = 0;
+  for (const row of Object.values(users || {})) {
+    const stamps = (row?.recent || []).map(Number).filter((t) => t && now - t <= windowMs);
+    total += stamps.length;
+  }
+  return total;
+}
+
+export interface GlobalQuotaStatus {
+  limit: number;
+  used: number;
+  remaining: number;
+  tripped: boolean;
+}
+
+/**
+ * 🚨 Global circuit breaker: poori site par 24h me itne video deliver ho chuke
+ * ho to naye deep-link banna band. Koi scraper poora course utha na le.
+ */
+export async function getGlobalDeliveryQuota(): Promise<GlobalQuotaStatus> {
+  const cfg = await getBotConfig();
+  const limit = Number(cfg.globalDailyLimit || 0);
+  const used = await getGlobalDeliveries24h();
+  return {
+    limit,
+    used,
+    remaining: limit > 0 ? Math.max(0, limit - used) : -1,
+    tripped: limit > 0 && used >= limit,
+  };
+}
+
+/** Kitne request abhi pending (undelivered) hain is user ke — flooding control. */
+export async function countPendingRequests(uid: string): Promise<number> {
+  const row = (await rtGet<WebQuotaRow>(
+    `${WEB_QUOTA_PREFIX}/${safeUid(uid)}`,
+    5000
+  )) || {};
+  return Object.keys(row.pending || {}).length;
+}
+
+/** Delivery ho jane ke baad pending entry hata do (bot ke webhook se nahi,
+ *  website next request par khud TTL se saaf karti hai). */
+export async function clearPendingRequest(uid: string, videoId: string): Promise<void> {
+  const key = `${WEB_QUOTA_PREFIX}/${safeUid(uid)}`;
+  const row = (await rtGet<WebQuotaRow>(key, 5000)) || {};
+  const pending = { ...(row.pending || {}) };
+  delete pending[String(videoId)];
+  await rtSet(key, { recent: row.recent || [], pending }, 6000);
+}
+
+/** TTL-expired tg_requests saaf karo (DB bharne se rokta hai). */
+export async function cleanupExpiredRequests(): Promise<number> {
+  const cfg = await getBotConfig();
+  const ttlMs = Number(cfg.requestTtlHours || 168) * 3600 * 1000;
+  if (ttlMs <= 0) return 0;
+  const now = Date.now();
+  const rows = await rtChildren<TelegramRequestRecord>(TG_REQUEST_PREFIX, 8000);
+  let removed = 0;
+  for (const [id, rec] of Object.entries(rows || {})) {
+    const created = Number(rec?.createdAt || 0);
+    if (!created) continue;
+    if (now - created > ttlMs) {
+      await rtRemove(`${TG_REQUEST_PREFIX}/${id}`, 5000);
+      removed += 1;
+    }
+  }
+  return removed;
 }

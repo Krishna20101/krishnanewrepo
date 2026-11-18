@@ -2,6 +2,7 @@
 
 import React, { useCallback, useEffect, useMemo, useState } from "react";
 import TelegramBotPanel from "@/components/admin/TelegramBotPanel";
+import TelegramPurgePanel from "@/components/admin/TelegramPurgePanel";
 import {
   ArrowDown,
   ArrowUp,
@@ -2633,6 +2634,17 @@ export default function AdminDashboardPage() {
                 </div>
               )}
             </div>
+
+            {/* ==================================================================
+                🧹 DANGER ZONE — Telegram se aaya sab kuch ek button me delete
+                (sirf Telegram-sourced links/courses/requests; real data safe)
+               ================================================================== */}
+            <TelegramPurgePanel
+              onPurged={() => {
+                void loadTelegramStudio();
+                void loadAdminOverview();
+              }}
+            />
           </div>
         )}
 
