@@ -183,6 +183,40 @@ Error / limit messages:
 
 ---
 
+### 🔒 Channel join-gate (delivery se pehle channel join zaroori)
+
+Admin Panel → **Telegram Bot Delivery → Channel join gate** se ON hota hai
+(koi `.env` change nahi chahiye — setting Firebase RTDB `bot_state/config` me
+jaati hai aur bot use ~30 second me pick kar leta hai).
+
+| Setting | Matlab |
+|---|---|
+| `joinGateEnabled` | ON = membership check chalega |
+| `joinGateChannel` | `@username` ya `-100xxxxxxxxxx` — kaunsa channel |
+| `joinGateInviteUrl` | Button ka link (khaali = `https://t.me/<username>`; private channel ke liye `https://t.me/+…` yahan daalein) |
+
+Flow:
+
+```
+Student deep-link kholta hai
+   ↓
+bot membership check karta hai  (pehle BOT session, fail hone par USER session)
+   ↓ member NAHI  → "📢 Join our channel" + "✅ I have joined" buttons
+   ↓                 link consume NAHI hota, quota NAHI katti
+   ↓ "I have joined" → live re-check → member mila to wahi request turant deliver
+   ↓ member HAI   → normal delivery (anti-theft gate → quota → search → upload)
+```
+
+Zaroori baatein:
+
+- **Bot ko us channel me ADMIN banayein** — warna Telegram member lookup refuse
+  karta hai. Aisi situation me gate **fail-open** rehta hai (video chali jaati
+  hai) taaki galat config ki saza student ko na mile; bot log me
+  `join-gate: membership check failed (…)` warning aur RTDB event
+  `join_gate_check_failed` dikhta hai.
+- Confirmed members **10 minute cache** rehte hain → repeat requests instant.
+- Events: `join_gate_block` (roka), `join_gate_pass` (verify hoke delivery).
+
 ## 6. Commands
 
 **User:** `/start <requestId>` • `/help` • `/status` • `/find <course> | <title>`

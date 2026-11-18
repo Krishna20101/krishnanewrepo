@@ -27,6 +27,7 @@ import {
   Loader2,
   Pause,
   Play,
+  Radio,
   RefreshCw,
   Save,
   Send,
@@ -57,6 +58,9 @@ interface BotConfigView {
   requestReuseLimit?: number;
   requestCooldownMin?: number;
   maxPendingPerUser?: number;
+  joinGateEnabled?: boolean;
+  joinGateChannel?: string;
+  joinGateInviteUrl?: string;
 }
 
 interface BotStatsView {
@@ -235,6 +239,10 @@ export default function TelegramBotPanel() {
   const [requestReuseLimit, setRequestReuseLimit] = useState(1);
   const [requestCooldownMin, setRequestCooldownMin] = useState(5);
   const [maxPendingPerUser, setMaxPendingPerUser] = useState(3);
+  // 🔒 channel join-gate (delivery se pehle channel membership zaroori)
+  const [joinGateEnabled, setJoinGateEnabled] = useState(false);
+  const [joinGateChannel, setJoinGateChannel] = useState("");
+  const [joinGateInviteUrl, setJoinGateInviteUrl] = useState("");
   const [globalQuota, setGlobalQuota] = useState<{
     limit: number;
     used: number;
@@ -282,6 +290,9 @@ export default function TelegramBotPanel() {
       setRequestReuseLimit(Math.max(1, Number(cfg.requestReuseLimit ?? 1) || 1));
       setRequestCooldownMin(Number(cfg.requestCooldownMin ?? 5) || 0);
       setMaxPendingPerUser(Math.max(1, Number(cfg.maxPendingPerUser ?? 3) || 3));
+      setJoinGateEnabled(Boolean(cfg.joinGateEnabled));
+      setJoinGateChannel(String(cfg.joinGateChannel || ""));
+      setJoinGateInviteUrl(String(cfg.joinGateInviteUrl || ""));
       setGlobalQuota(
         (json as { globalQuota?: typeof globalQuota }).globalQuota || null
       );
@@ -345,6 +356,9 @@ export default function TelegramBotPanel() {
           requestReuseLimit: Math.max(1, Math.round(requestReuseLimit) || 1),
           requestCooldownMin: Math.max(0, Math.round(requestCooldownMin) || 0),
           maxPendingPerUser: Math.max(1, Math.round(maxPendingPerUser) || 3),
+          joinGateEnabled,
+          joinGateChannel: joinGateChannel.trim(),
+          joinGateInviteUrl: joinGateInviteUrl.trim(),
         },
       },
       "save-config"
@@ -354,7 +368,7 @@ export default function TelegramBotPanel() {
       setNotice("Bot configuration saved. The bot picks this up within ~30 seconds.");
       await load();
     }
-  }, [post, load, mode, botUsername, dailyLimit, autoDeleteHours, creditUsername, contactUsername, deliveryMode, paused, maxDialogs, maxMessagesPerChat, requestTtlHours, globalDailyLimit, requestReuseLimit, requestCooldownMin, maxPendingPerUser]);
+  }, [post, load, mode, botUsername, dailyLimit, autoDeleteHours, creditUsername, contactUsername, deliveryMode, paused, maxDialogs, maxMessagesPerChat, requestTtlHours, globalDailyLimit, requestReuseLimit, requestCooldownMin, maxPendingPerUser, joinGateEnabled, joinGateChannel, joinGateInviteUrl]);
 
   const toggleRequireWorkerSecret = useCallback(
     async (next: boolean) => {
@@ -875,6 +889,99 @@ export default function TelegramBotPanel() {
           >
             {saving ? <Loader2 className="h-4 w-4 animate-spin" /> : <Save className="h-4 w-4" />}
             Save anti-theft settings
+          </button>
+        </div>
+      </div>
+
+      {/* ───────────────────── 🔒 channel join-gate ─────────────────────── */}
+      <div className="glass-card rounded-3xl border border-sky-400/25 p-4 sm:p-5">
+        <div className="flex flex-wrap items-start justify-between gap-3">
+          <div>
+            <h3 className="flex items-center gap-2 text-sm font-black uppercase tracking-wider text-white">
+              <Radio className="h-4 w-4 text-sky-300" />
+              Channel join gate
+            </h3>
+            <p className="mt-2 max-w-3xl text-[11px] leading-relaxed text-slate-400">
+              When this is ON, a student must join your Telegram channel before
+              the bot sends any video. The bot replies with a “Join our channel”
+              button plus an “I have joined” button that verifies membership
+              live. The deep link is <span className="text-slate-300">not</span>{" "}
+              consumed and no quota is spent while the student is blocked, so
+              nothing is lost.
+            </p>
+          </div>
+          <button
+            type="button"
+            onClick={() => setJoinGateEnabled((v) => !v)}
+            className={`relative h-8 w-16 shrink-0 rounded-full border transition ${
+              joinGateEnabled
+                ? "border-sky-400/60 bg-sky-500/35"
+                : "border-white/15 bg-white/[0.06]"
+            }`}
+            aria-pressed={joinGateEnabled}
+            title={joinGateEnabled ? "Join gate is ON" : "Join gate is OFF"}
+          >
+            <span
+              className={`absolute top-1 h-6 w-6 rounded-full transition-all ${
+                joinGateEnabled ? "left-9 bg-sky-300" : "left-1 bg-slate-500"
+              }`}
+            />
+          </button>
+        </div>
+
+        <div className="mt-5 grid grid-cols-1 gap-4 md:grid-cols-2">
+          <Field
+            label="Channel to verify (@username or chat id)"
+            hint="The bot must be an ADMIN of this channel, otherwise Telegram refuses the member lookup and the gate fails OPEN (students still get their videos; you will see a warning in the bot log)."
+          >
+            <input
+              className={inputCls}
+              type="text"
+              spellCheck={false}
+              placeholder="@your_channel  or  -1001234567890"
+              value={joinGateChannel}
+              onChange={(e) => setJoinGateChannel(e.target.value)}
+            />
+          </Field>
+
+          <Field
+            label="Invite link for the button (optional)"
+            hint="Leave empty to auto-build https://t.me/<username>. Use a private t.me/+… invite link here if your channel is private."
+          >
+            <input
+              className={inputCls}
+              type="text"
+              spellCheck={false}
+              placeholder="https://t.me/+AbCdEfGhIjKlMnOp"
+              value={joinGateInviteUrl}
+              onChange={(e) => setJoinGateInviteUrl(e.target.value)}
+            />
+          </Field>
+        </div>
+
+        <div className="mt-4 grid grid-cols-1 gap-2 text-[11px] font-semibold text-slate-400 sm:grid-cols-2">
+          <p className="rounded-2xl border border-white/10 bg-white/[0.03] px-3.5 py-2.5">
+            <span className="text-sky-300">How the check works:</span> the bot asks
+            Telegram for the member list entry of that user (bot session first,
+            then the user session). Confirmed members are cached for 10 minutes
+            so repeat requests are instant.
+          </p>
+          <p className="rounded-2xl border border-white/10 bg-white/[0.03] px-3.5 py-2.5">
+            <span className="text-sky-300">Order of checks:</span> join gate →
+            anti-theft gate → daily quota → search &amp; deliver. A blocked
+            student never burns a link or a quota slot.
+          </p>
+        </div>
+
+        <div className="mt-4 flex justify-end">
+          <button
+            type="button"
+            onClick={() => void saveConfig()}
+            disabled={saving || Boolean(busyAction)}
+            className="inline-flex items-center gap-2 rounded-2xl border border-sky-400/40 bg-sky-500/15 px-5 py-3 text-xs font-black uppercase tracking-widest text-sky-100 transition hover:bg-sky-500/25 disabled:opacity-50"
+          >
+            {saving ? <Loader2 className="h-4 w-4 animate-spin" /> : <Save className="h-4 w-4" />}
+            Save join-gate settings
           </button>
         </div>
       </div>

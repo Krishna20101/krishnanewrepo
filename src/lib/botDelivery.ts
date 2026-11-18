@@ -50,6 +50,15 @@ export interface BotConfig {
   requestCooldownMin: number;
   /** Ek user ek time me kitne PENDING (undelivered) request rakh sakta hai. */
   maxPendingPerUser: number;
+
+  // ── 🔒 CHANNEL JOIN-GATE (v7) ───────────────────────────────────────────
+  /** True = video lene se pehle student ko channel join karna zaroori hai. */
+  joinGateEnabled: boolean;
+  /** Kaunsa channel check karna hai — "@username" ya "-100xxxxxxxxxx".
+   *  ⚠️ Bot us channel me ADMIN hona chahiye warna check fail-open hota hai. */
+  joinGateChannel: string;
+  /** "Join our channel" button ka link (khaali = https://t.me/<username>). */
+  joinGateInviteUrl: string;
 }
 
 export const DEFAULT_BOT_CONFIG: BotConfig = {
@@ -74,6 +83,11 @@ export const DEFAULT_BOT_CONFIG: BotConfig = {
   requestReuseLimit: 1,
   requestCooldownMin: 5,
   maxPendingPerUser: 3,
+
+  // 🔒 join-gate default OFF — admin explicitly on kare (channel set karke)
+  joinGateEnabled: false,
+  joinGateChannel: "",
+  joinGateInviteUrl: "",
 };
 
 export interface TelegramRequestRecord {

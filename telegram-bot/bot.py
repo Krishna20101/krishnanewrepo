@@ -187,6 +187,36 @@ MSG_GLOBAL_LIMIT = (
     "Please try again after some time."
 )
 
+# ── 🔒 CHANNEL JOIN-GATE messages (v7) ─────────────────────────────────────
+MSG_JOIN_GATE = (
+    "🔒 Please join our channel first.\n\n"
+    "Your lecture \"{title}\" is ready, but this service is only for our "
+    "channel members.\n"
+    "1. Tap \"Join our channel\" below.\n"
+    "2. Come back and tap \"I have joined\" — I will verify and send the "
+    "video here right away.\n\n"
+    "Your link stays valid, so nothing is lost."
+)
+MSG_JOIN_GATE_SHORT = (
+    "🔒 Please join our channel first, then tap \"I have joined\".\n"
+    "Video delivery is only for channel members."
+)
+MSG_JOIN_VERIFIED = "✅ Verified — sending your lecture now…"
+MSG_JOIN_STILL_NOT = (
+    "⚠️ I could not confirm your membership yet.\n"
+    "Open the channel, tap Join, then press \"I have joined\" again."
+)
+MSG_JOIN_RETRY = (
+    "✅ Membership verified.\n"
+    "Your earlier link has expired — please open the lecture on the website "
+    "and tap ▶ OPEN IN TELEGRAM again."
+)
+
+#: Membership result kitni der cache rahe (sirf POSITIVE result cache hota hai)
+JOIN_GATE_CACHE_SEC = 600
+#: Pending "I have joined" entry kitni der valid rahe
+JOIN_PENDING_TTL_SEC = 2 * 60 * 60
+
 
 # ─────────────────────────────────────────────────────────────────────────────
 # SMALL HELPERS
@@ -322,6 +352,23 @@ class ProgressReporter:
 # ─────────────────────────────────────────────────────────────────────────────
 # DELIVERY BOT
 # ─────────────────────────────────────────────────────────────────────────────
+class _CallbackReplies:
+    """CallbackQuery event par `reply()` shim.
+
+    Delivery code `event.reply(...)` bulata hai; Telegram callback events par
+    `respond()` hota hai — ye chhota adapter dono ko jod deta hai.
+    """
+
+    def __init__(self, event: Any) -> None:
+        self._event = event
+
+    def __getattr__(self, name: str) -> Any:
+        return getattr(self._event, name)
+
+    async def reply(self, *args: Any, **kwargs: Any) -> Any:
+        return await self._event.respond(*args, **kwargs)
+
+
 class DeliveryBot:
     def __init__(self, store: Store, creds: Dict[str, Any]) -> None:
         self.store = store
@@ -336,6 +383,10 @@ class DeliveryBot:
         self._stopping = False
         self._admin_ids: set = set()
         self._queue_depth = 0
+        # 🔒 join-gate: uid → (expiry_ts, True) sirf confirmed members cache
+        self._join_cache: Dict[int, Tuple[float, bool]] = {}
+        # 🔒 join-gate: uid → (request_id, ts) "I have joined" dabane par resume
+        self._pending_join: Dict[int, Tuple[str, float]] = {}
         self.tmp_dir = os.environ.get("BOT_DOWNLOAD_DIR") or os.path.join(HERE, "downloads")
         os.makedirs(self.tmp_dir, exist_ok=True)
 
@@ -355,6 +406,16 @@ class DeliveryBot:
         if self._me_id:
             admins.add(int(self._me_id))
         self._admin_ids = admins
+
+        # 🔒 join-gate: .env se bhi set ho sakta hai (Admin Panel ki value jeetti
+        #    hai; env sirf tab use hota hai jab panel me khaali chhoda ho).
+        env_channel = str(os.environ.get("JOIN_GATE_CHANNEL") or "").strip()
+        if env_channel and not str(self.cfg.get("joinGateChannel") or "").strip():
+            self.cfg["joinGateChannel"] = env_channel
+            self.cfg["joinGateEnabled"] = True
+        env_invite = str(os.environ.get("JOIN_GATE_INVITE_URL") or "").strip()
+        if env_invite and not str(self.cfg.get("joinGateInviteUrl") or "").strip():
+            self.cfg["joinGateInviteUrl"] = env_invite
         return self.cfg
 
     _me_id: Optional[int] = None
@@ -441,12 +502,22 @@ class DeliveryBot:
             asyncio.ensure_future(self._heartbeat_loop()),
             asyncio.ensure_future(self._cleanup_loop()),
         ]
+        gate_on = bool(self.cfg.get("joinGateEnabled")) and bool(
+            str(self.cfg.get("joinGateChannel") or "").strip()
+        )
+        if bool(self.cfg.get("joinGateEnabled")) and not gate_on:
+            log(
+                "⚠️ join-gate ENABLED hai par joinGateChannel khaali hai — gate "
+                "ignore ho raha hai (Admin Panel → Telegram Bot Delivery me "
+                "channel @username bharein)."
+            )
         log(
-            "✅ Bot ready • mode=%s • limit=%s/24h • auto-delete=%sh • storage=%s"
+            "✅ Bot ready • mode=%s • limit=%s/24h • auto-delete=%sh • join-gate=%s • storage=%s"
             % (
                 self.cfg.get("deliveryMode"),
                 self.cfg.get("dailyLimit"),
                 self.cfg.get("autoDeleteHours"),
+                ("ON " + str(self.cfg.get("joinGateChannel"))) if gate_on else "off",
                 self.store.backend,
             )
         )
@@ -465,6 +536,39 @@ class DeliveryBot:
     # ── handlers ───────────────────────────────────────────────────────────
     def _register_handlers(self) -> None:
         from telethon import events
+
+        @self.bot.on(events.CallbackQuery(data=re.compile(rb"^jg:(-?\d+)$")))
+        async def on_join_gate(event: Any) -> None:  # noqa: D401
+            """✅ 'I have joined' button → live verify → delivery resume."""
+            uid = int(event.sender_id or 0)
+            try:
+                self.refresh_config()
+                state = join_gate_state(self.cfg, await self._check_channel_member(uid))
+                if state == "block":
+                    await event.answer(self._fmt(MSG_JOIN_STILL_NOT), alert=True)
+                    return
+
+                pending = self._pending_join.pop(uid, None)
+                if pending and (time.time() - float(pending[1])) > JOIN_PENDING_TTL_SEC:
+                    pending = None
+                if state == "pass":
+                    try:
+                        await event.answer(self._fmt(MSG_JOIN_VERIFIED), alert=False)
+                    except Exception:  # noqa: BLE001
+                        pass
+                if pending and pending[0]:
+                    self.store.log_event("join_gate_pass", uid=uid, requestId=pending[0])
+                    await self.handle_delivery_request(
+                        _CallbackReplies(event), uid, str(pending[0])
+                    )
+                    return
+                await event.respond(self._fmt(MSG_JOIN_RETRY))
+            except Exception as exc:  # noqa: BLE001
+                log("join-gate callback crash: %s\n%s" % (short_error(exc), traceback.format_exc()))
+                try:
+                    await event.answer("⚠️ Please try again in a moment.", alert=True)
+                except Exception:  # noqa: BLE001
+                    pass
 
         @self.bot.on(events.NewMessage(incoming=True))
         async def on_message(event: Any) -> None:  # noqa: D401
@@ -753,6 +857,92 @@ class DeliveryBot:
         request["requestId"] = request_id
         await self._deliver(event, uid, request, request_id=request_id)
 
+    # ── 🔒 channel join-gate ───────────────────────────────────────────────
+    async def _check_channel_member(self, uid: int) -> Optional[bool]:
+        """True/False = confirmed, None = check possible nahi (fail-open).
+
+        Pehle BOT client try hota hai (bot ko channel me ADMIN hona chahiye),
+        fail hone par USER session (jo khud channel ka member hota hai).
+        """
+        channel = str(self.cfg.get("joinGateChannel") or "").strip()
+        if not channel or not uid:
+            return None
+
+        now = time.time()
+        cached = self._join_cache.get(int(uid))
+        if cached and cached[0] > now and cached[1]:
+            return True
+
+        target: Any = channel
+        if channel.lstrip("-").isdigit():
+            try:
+                target = int(channel)
+            except ValueError:
+                target = channel
+
+        result: Optional[bool] = None
+        for client in (self.bot, self.user):
+            if client is None:
+                continue
+            try:
+                from telethon import functions
+
+                res = await client(
+                    functions.channels.GetParticipantRequest(
+                        channel=target, participant=int(uid)
+                    )
+                )
+                part = getattr(res, "participant", None)
+                # Banned/kicked = member nahi; baaki sab (creator/admin/member) = member
+                result = type(part).__name__ != "ChannelParticipantBanned"
+                break
+            except Exception as exc:  # noqa: BLE001
+                name = type(exc).__name__
+                if name in (
+                    "UserNotParticipantError",
+                    "UserBannedInChannelError",
+                    "ChannelParticipantNotFound",
+                ):
+                    result = False
+                    break
+                log(
+                    "join-gate: membership check failed (%s): %s"
+                    % (name, short_error(exc))
+                )
+                continue
+
+        if result is True:
+            self._join_cache[int(uid)] = (now + JOIN_GATE_CACHE_SEC, True)
+        elif result is None:
+            self.store.log_event("join_gate_check_failed", uid=int(uid))
+        return result
+
+    async def _send_join_gate(
+        self, event: Any, uid: int, request: Dict[str, Any], request_id: str
+    ) -> None:
+        """Join button + 'I have joined' button bhejo aur delivery rok do."""
+        from telethon import Button
+
+        title = clean_text(str(request.get("title") or "your lecture"))[:120]
+        invite = _join_invite_url(self.cfg)
+        row: List[Any] = []
+        if invite:
+            row.append(Button.url("📢 Join our channel", invite))
+            text = self._fmt(MSG_JOIN_GATE, title=title)
+        else:
+            text = self._fmt(MSG_JOIN_GATE_SHORT)
+        row.append(Button.inline("✅ I have joined", b"jg:%d" % int(uid)))
+        try:
+            await event.reply(text, buttons=[row], link_preview=False)
+        except TypeError:
+            # kuch event shim par link_preview support nahi hota
+            await event.reply(text, buttons=[row])
+
+        if request_id and request_id != "find":
+            self._pending_join[int(uid)] = (str(request_id), time.time())
+        self.store.log_event("join_gate_block", uid=int(uid), requestId=request_id)
+        log("🔒 join-gate blocked uid=%s (channel=%s)" % (uid, self.cfg.get("joinGateChannel")))
+
     async def _deliver(self, event: Any, uid: int, request: Dict[str, Any], request_id: str) -> None:
         self.refresh_config()
 
@@ -768,6 +958,15 @@ class DeliveryBot:
         if request.get("youtubeUrl") and not request.get("chatId"):
             await event.reply(self._fmt(MSG_NO_MEDIA))
             return
+
+        # 🔒 CHANNEL JOIN-GATE: member nahi hai to link consume hi nahi hota
+        #    (quota bhi nahi katti, binding bhi nahi hoti).
+        if bool(self.cfg.get("joinGateEnabled")) and str(
+            self.cfg.get("joinGateChannel") or ""
+        ).strip():
+            if join_gate_state(self.cfg, await self._check_channel_member(uid)) == "block":
+                await self._send_join_gate(event, uid, request, request_id)
+                return
 
         # 🛡️ ANTI-THEFT GATE: global breaker → single-use → account binding
         gate_reason = ""
@@ -1432,6 +1631,37 @@ def _video_attributes(message: Any, file_name: str) -> List[Any]:
 #                               usi ka; dusre user ko "belongs to another account"
 # Pure function hai taaki offline self-test me verify ho sake.
 # ─────────────────────────────────────────────────────────────────────────────
+def join_gate_state(cfg: Dict[str, Any], is_member: Optional[bool]) -> str:
+    """🔒 Join-gate ka faisla (pure function — offline test ho sakti hai).
+
+    Returns:
+      "off"     → gate band hai ya channel configured nahi (delivery chalu)
+      "pass"    → member confirmed (delivery chalu)
+      "block"   → member NAHI hai (delivery roko, join button dikhao)
+      "unknown" → check fail hua (bot admin nahi / channel private) → FAIL-OPEN,
+                  delivery chalu rahegi taaki galat config ki saza student ko
+                  na mile; owner ko logs me warning dikhti hai.
+    """
+    if not bool(cfg.get("joinGateEnabled")):
+        return "off"
+    if not str(cfg.get("joinGateChannel") or "").strip():
+        return "off"
+    if is_member is None:
+        return "unknown"
+    return "pass" if is_member else "block"
+
+
+def _join_invite_url(cfg: Dict[str, Any]) -> str:
+    """Button ke liye invite link — configured ho to wahi, warna t.me/<user>."""
+    invite = str(cfg.get("joinGateInviteUrl") or "").strip()
+    if invite:
+        return invite
+    channel = str(cfg.get("joinGateChannel") or "").strip()
+    if not channel or channel.lstrip("-").isdigit():
+        return ""
+    return "https://t.me/" + channel.lstrip("@")
+
+
 def request_gate(
     request: Dict[str, Any],
     uid: int,
@@ -1759,6 +1989,37 @@ def cmd_selftest() -> int:
     ok, why = request_gate(fresh, 555, {**gate_cfg, "globalDailyLimit": 0}, videos_last_24h=99999)
     check("global breaker off = allowed", ok and why == "", why)
     ok, why = request_gate({"usedCount": "2", "boundTgUid": "7"}, 7, {**gate_cfg, "requestReuseLimit": 2})
+
+    # ── 🔒 join-gate ────────────────────────────────────────────────────────
+    gate_off = {"joinGateEnabled": False, "joinGateChannel": "@shd"}
+    gate_on = {"joinGateEnabled": True, "joinGateChannel": "@shd"}
+    check("join-gate off", join_gate_state(gate_off, False) == "off")
+    check("join-gate on + member", join_gate_state(gate_on, True) == "pass")
+    check("join-gate on + not member", join_gate_state(gate_on, False) == "block")
+    check("join-gate check failed = fail-open", join_gate_state(gate_on, None) == "unknown")
+    check(
+        "join-gate on but no channel = off",
+        join_gate_state({"joinGateEnabled": True, "joinGateChannel": "  "}, False) == "off",
+    )
+    check(
+        "invite url from username",
+        _join_invite_url({"joinGateChannel": "@shd_channel"}) == "https://t.me/shd_channel",
+    )
+    check(
+        "invite url explicit wins",
+        _join_invite_url(
+            {"joinGateChannel": "@shd", "joinGateInviteUrl": "https://t.me/+abc"}
+        )
+        == "https://t.me/+abc",
+    )
+    check(
+        "invite url empty for private id",
+        _join_invite_url({"joinGateChannel": "-1001234567890"}) == "",
+    )
+    check(
+        "DEFAULT_CONFIG has join-gate keys",
+        all(k in DEFAULT_CONFIG for k in ("joinGateEnabled", "joinGateChannel", "joinGateInviteUrl")),
+    )
     check("string fields handled", (not ok) and why == "used", why)
     check(
         "message object stripped",

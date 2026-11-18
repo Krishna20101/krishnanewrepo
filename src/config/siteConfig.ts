@@ -6,7 +6,7 @@
 
 export const SITE_CONFIG = {
   appName: "Study helper Doc",
-  appTagline: "ALL BATCHES UNLOCK FREE",
+  appTagline: "Learn at your own pace",
 
   // Vercel Deployment Domain
   appDomain:

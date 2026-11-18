@@ -190,7 +190,7 @@ export default function TelegramDeliveryCard({
   const sizeText = formatSize(fileSize);
 
   return (
-    <div className="relative flex h-full w-full items-center justify-center overflow-hidden bg-[#05070f] p-4">
+    <div className="relative flex h-full w-full items-center justify-center overflow-hidden bg-ink-950 p-4">
       {/* Ambient glow + thumbnail blur */}
       <SafeImage
         src={thumbnail}
@@ -198,7 +198,7 @@ export default function TelegramDeliveryCard({
         alt={title}
         className="absolute inset-0 h-full w-full object-cover opacity-15 blur-[2px]"
       />
-      <div className="pointer-events-none absolute inset-0 bg-gradient-to-b from-[#05070f]/60 via-[#05070f]/85 to-[#05070f]" />
+      <div className="pointer-events-none absolute inset-0 bg-gradient-to-t from-ink-950 via-ink-950/85 to-ink-950/55" />
 
       <div className="relative z-10 flex w-full max-w-lg flex-col items-center gap-4">
         {/* ── PHONE MOCKUP (tap target) ─────────────────────────────────── */}
@@ -207,32 +207,32 @@ export default function TelegramDeliveryCard({
           onClick={openTelegram}
           disabled={status === "linking" || paused}
           aria-label="Open in Telegram"
-          className="group relative w-[170px] shrink-0 rounded-[26px] border border-cyan-400/30 bg-gradient-to-b from-[#0b1130] to-[#070a1c] p-2.5 shadow-[0_0_40px_-12px_rgba(34,211,238,0.55)] transition active:scale-[0.97] disabled:cursor-not-allowed disabled:opacity-70 sm:w-[190px]"
+          className="group relative w-[170px] shrink-0 rounded-card border border-ember-500/30 bg-gradient-to-b from-ink-850 to-ink-950 p-2.5 shadow-lift transition active:scale-[0.97] disabled:cursor-not-allowed disabled:opacity-70 sm:w-[190px]"
         >
           <span className="mx-auto mb-2 block h-1.5 w-12 rounded-full bg-white/15" />
-          <span className="relative flex aspect-[9/16] w-full flex-col items-center justify-center gap-3 overflow-hidden rounded-[18px] bg-[#0a0f26]">
+          <span className="relative flex aspect-[9/16] w-full flex-col items-center justify-center gap-3 overflow-hidden rounded-tag bg-ink-900">
             {/* pulse rings */}
-            <span className="pointer-events-none absolute h-24 w-24 animate-ping rounded-full bg-sky-500/20" />
-            <span className="pointer-events-none absolute h-16 w-16 rounded-full bg-sky-500/25 blur-md" />
+            <span className="pointer-events-none absolute h-24 w-24 animate-ping rounded-full bg-ember-500/15" />
+            <span className="pointer-events-none absolute h-16 w-16 rounded-full bg-ember-500/20 blur-md" />
 
             <span className="relative flex h-14 w-14 items-center justify-center rounded-full bg-gradient-to-br from-[#2AABEE] to-[#229ED9] shadow-lg">
               {status === "linking" ? (
-                <Loader2 className="h-7 w-7 animate-spin text-white" />
+                <Loader2 className="h-7 w-7 animate-spin text-sand-100" />
               ) : status === "ready" ? (
-                <CheckCircle2 className="h-7 w-7 text-white" />
+                <CheckCircle2 className="h-7 w-7 text-sand-100" />
               ) : (
-                <Send className="h-6 w-6 translate-x-[1px] text-white" />
+                <Send className="h-6 w-6 translate-x-[1px] text-sand-100" />
               )}
             </span>
 
-            <span className="relative px-3 text-center text-[11px] font-black uppercase tracking-[0.16em] text-cyan-200">
+            <span className="relative px-3 text-center text-[11px] font-black uppercase tracking-[0.16em] text-ember-300">
               {status === "linking"
                 ? "Creating link…"
                 : status === "ready"
                   ? "Tap again to reopen"
                   : "Open in Telegram"}
             </span>
-            <span className="relative px-3 text-center text-[10px] font-semibold leading-snug text-slate-400">
+            <span className="relative px-3 text-center text-[10px] font-semibold leading-snug text-sand-400">
               {paused
                 ? "Delivery paused by admin"
                 : "Video will arrive in your Telegram chat"}
@@ -247,7 +247,7 @@ export default function TelegramDeliveryCard({
             type="button"
             onClick={openTelegram}
             disabled={status === "linking" || paused}
-            className="flex w-full items-center justify-center gap-2.5 rounded-2xl bg-gradient-to-r from-[#2AABEE] to-[#229ED9] px-5 py-3.5 text-sm font-black uppercase tracking-wider text-white shadow-[0_10px_30px_-10px_rgba(42,171,238,0.8)] transition hover:brightness-110 active:scale-[0.98] disabled:cursor-not-allowed disabled:opacity-60"
+            className="btn-ember w-full px-5 py-3.5 text-[13px] uppercase tracking-[0.14em] disabled:cursor-not-allowed disabled:opacity-60"
           >
             {status === "linking" ? (
               <Loader2 className="h-5 w-5 animate-spin" />
@@ -264,23 +264,23 @@ export default function TelegramDeliveryCard({
           </button>
 
           {deepLink && (
-            <div className="flex items-center gap-2 rounded-2xl border border-white/10 bg-white/5 px-3 py-2">
-              <code className="min-w-0 flex-1 truncate text-[11px] font-semibold text-cyan-200">
+            <div className="surface flex items-center gap-2 rounded-xl px-3 py-2">
+              <code className="min-w-0 flex-1 truncate text-[11px] font-semibold text-ember-300">
                 {deepLink}
               </code>
               <button
                 type="button"
                 onClick={copyLink}
-                className="inline-flex shrink-0 items-center gap-1 rounded-xl border border-white/15 bg-white/5 px-2.5 py-1.5 text-[10px] font-black uppercase text-slate-200 active:scale-95"
+                className="btn-ghost shrink-0 px-2.5 py-1.5 text-[10px] uppercase tracking-[0.1em]"
               >
-                {copied ? <CheckCircle2 className="h-3.5 w-3.5 text-emerald-300" /> : <Copy className="h-3.5 w-3.5" />}
+                {copied ? <CheckCircle2 className="h-3.5 w-3.5 text-sage-300" /> : <Copy className="h-3.5 w-3.5" />}
                 <span>{copied ? "Copied" : "Copy"}</span>
               </button>
               <a
                 href={deepLink}
                 target="_blank"
                 rel="noopener noreferrer"
-                className="inline-flex shrink-0 items-center gap-1 rounded-xl border border-cyan-400/40 bg-cyan-500/15 px-2.5 py-1.5 text-[10px] font-black uppercase text-cyan-100 active:scale-95"
+                className="btn-ghost shrink-0 border-ember-500/40 bg-ember-500/12 px-2.5 py-1.5 text-[10px] uppercase tracking-[0.1em] text-ember-200"
               >
                 <ExternalLink className="h-3.5 w-3.5" />
                 <span>Open</span>
@@ -289,7 +289,7 @@ export default function TelegramDeliveryCard({
           )}
 
           {status === "error" && error && (
-            <div className="flex items-start gap-2 rounded-2xl border border-rose-400/30 bg-rose-500/10 px-3.5 py-3">
+            <div className="flex items-start gap-2 rounded-xl border border-rose-400/30 bg-rose-500/10 px-3.5 py-3">
               <AlertTriangle className="mt-0.5 h-4 w-4 shrink-0 text-rose-300" />
               <p className="text-[11px] font-semibold leading-relaxed text-rose-100">
                 {error}
@@ -299,16 +299,16 @@ export default function TelegramDeliveryCard({
           )}
 
           {notice && (
-            <div className="flex items-start gap-2 rounded-2xl border border-amber-400/30 bg-amber-500/10 px-3.5 py-3">
-              <AlertTriangle className="mt-0.5 h-4 w-4 shrink-0 text-amber-300" />
-              <p className="text-[11px] font-semibold leading-relaxed text-amber-100">{notice}</p>
+            <div className="flex items-start gap-2 rounded-xl border border-ember-500/30 bg-ember-500/10 px-3.5 py-3">
+              <AlertTriangle className="mt-0.5 h-4 w-4 shrink-0 text-ember-400" />
+              <p className="text-[11px] font-semibold leading-relaxed text-ember-200">{notice}</p>
             </div>
           )}
 
           {status === "ready" && !notice && (
-            <div className="flex items-start gap-2 rounded-2xl border border-emerald-400/30 bg-emerald-500/10 px-3.5 py-3">
-              <CheckCircle2 className="mt-0.5 h-4 w-4 shrink-0 text-emerald-300" />
-              <p className="text-[11px] font-semibold leading-relaxed text-emerald-100">
+            <div className="flex items-start gap-2 rounded-xl border border-sage-400/30 bg-sage-500/10 px-3.5 py-3">
+              <CheckCircle2 className="mt-0.5 h-4 w-4 shrink-0 text-sage-300" />
+              <p className="text-[11px] font-semibold leading-relaxed text-sage-300">
                 Telegram opened. The bot is searching your lecture now — watch the
                 live progress there (Downloading → Uploading). If nothing opened,
                 use the link above.
@@ -319,27 +319,27 @@ export default function TelegramDeliveryCard({
 
         {/* ── 🛡️ DAILY QUOTA (anti-theft) ───────────────────────────────── */}
         {quota ? (
-          <div className="flex w-full items-center justify-between gap-3 rounded-2xl border border-cyan-400/25 bg-cyan-500/[0.07] px-3.5 py-2.5">
-            <span className="flex items-center gap-2 text-[11px] font-bold text-cyan-100">
-              <ShieldCheck className="h-3.5 w-3.5 shrink-0 text-cyan-300" />
+          <div className="flex w-full items-center justify-between gap-3 rounded-xl border border-ember-500/25 bg-ember-500/[0.07] px-3.5 py-2.5">
+            <span className="flex items-center gap-2 text-[11px] font-bold text-ember-200">
+              <ShieldCheck className="h-3.5 w-3.5 shrink-0 text-ember-400" />
               {quota.remaining > 0
                 ? `${quota.remaining} of ${quota.limit} videos left today`
                 : `Daily limit reached (${quota.used}/${quota.limit})`}
             </span>
             {quota.remaining <= 0 && quota.resetInSec > 0 ? (
-              <span className="shrink-0 text-[10px] font-black uppercase tracking-wider text-amber-200">
+              <span className="shrink-0 text-[10px] font-black uppercase tracking-wider text-ember-300">
                 resets in {Math.max(1, Math.ceil(quota.resetInSec / 3600))}h
               </span>
             ) : (
-              <span className="shrink-0 text-[10px] font-semibold text-slate-400">
+              <span className="shrink-0 text-[10px] font-semibold text-sand-400">
                 used {quota.used}/{quota.limit}
               </span>
             )}
           </div>
         ) : (
-          <div className="flex w-full items-center gap-2 rounded-2xl border border-white/10 bg-white/[0.03] px-3.5 py-2.5">
-            <ShieldCheck className="h-3.5 w-3.5 shrink-0 text-emerald-300" />
-            <span className="text-[11px] font-semibold text-slate-300">
+          <div className="flex w-full items-center gap-2 rounded-xl border border-white/[0.08] bg-white/[0.03] px-3.5 py-2.5">
+            <ShieldCheck className="h-3.5 w-3.5 shrink-0 text-sage-300" />
+            <span className="text-[11px] font-semibold text-sand-300">
               Fair-use limit: {dailyLimit} videos every 24 hours • each link works
               once, for your Telegram account only
             </span>
@@ -347,20 +347,20 @@ export default function TelegramDeliveryCard({
         )}
 
         {/* ── LECTURE META ──────────────────────────────────────────────── */}
-        <div className="w-full rounded-2xl border border-white/10 bg-[#090d24]/85 p-3.5">
-          <h2 className="line-clamp-2 text-sm font-extrabold leading-snug text-white">{title}</h2>
+        <div className="surface w-full rounded-card p-3.5">
+          <h2 className="line-clamp-2 text-sm font-extrabold leading-snug text-sand-100">{title}</h2>
           {topic ? (
-            <p className="mt-1 line-clamp-2 text-[11px] font-semibold text-cyan-300/90">
+            <p className="mt-1 line-clamp-2 text-[11px] font-semibold text-ember-400/90">
               📚 Topic: {topic}
             </p>
           ) : null}
           {courseName ? (
-            <p className="mt-0.5 line-clamp-1 text-[11px] font-semibold text-purple-300/90">
+            <p className="mt-0.5 line-clamp-1 text-[11px] font-semibold text-sage-300/90">
               🎓 Course: {courseName}
             </p>
           ) : null}
           {sizeText ? (
-            <p className="mt-0.5 text-[10px] font-bold uppercase tracking-wide text-slate-400">
+            <p className="mt-0.5 text-[10px] font-bold uppercase tracking-wide text-sand-400">
               Size: {sizeText}
             </p>
           ) : null}
@@ -368,26 +368,26 @@ export default function TelegramDeliveryCard({
 
         {/* ── RULES / INFO CHIPS ────────────────────────────────────────── */}
         <div className="grid w-full grid-cols-1 gap-2 sm:grid-cols-3">
-          <div className="flex items-start gap-2 rounded-xl border border-white/10 bg-white/5 px-3 py-2.5">
-            <Play className="mt-0.5 h-3.5 w-3.5 shrink-0 text-cyan-300" />
-            <p className="text-[10px] font-semibold leading-snug text-slate-300">
-              Daily limit: <span className="text-white">{dailyLimit} videos / 24h</span>
+          <div className="chip items-start rounded-tag px-3 py-2.5 text-left">
+            <Play className="mt-0.5 h-3.5 w-3.5 shrink-0 text-ember-400" />
+            <p className="text-[10px] font-semibold leading-snug text-sand-300">
+              Daily limit: <span className="text-sand-100">{dailyLimit} videos / 24h</span>
               <br />
               Need more? Contact @{contactUsername}
             </p>
           </div>
-          <div className="flex items-start gap-2 rounded-xl border border-white/10 bg-white/5 px-3 py-2.5">
-            <Clock className="mt-0.5 h-3.5 w-3.5 shrink-0 text-amber-300" />
-            <p className="text-[10px] font-semibold leading-snug text-slate-300">
+          <div className="chip items-start rounded-tag px-3 py-2.5 text-left">
+            <Clock className="mt-0.5 h-3.5 w-3.5 shrink-0 text-ember-400" />
+            <p className="text-[10px] font-semibold leading-snug text-sand-300">
               Auto-delete after{" "}
-              <span className="text-white">{autoDeleteHours} hour{autoDeleteHours === 1 ? "" : "s"}</span>
+              <span className="text-sand-100">{autoDeleteHours} hour{autoDeleteHours === 1 ? "" : "s"}</span>
               <br />
               Save it before that
             </p>
           </div>
-          <div className="flex items-start gap-2 rounded-xl border border-white/10 bg-white/5 px-3 py-2.5">
-            <ShieldCheck className="mt-0.5 h-3.5 w-3.5 shrink-0 text-emerald-300" />
-            <p className="text-[10px] font-semibold leading-snug text-slate-300">
+          <div className="chip items-start rounded-tag px-3 py-2.5 text-left">
+            <ShieldCheck className="mt-0.5 h-3.5 w-3.5 shrink-0 text-sage-300" />
+            <p className="text-[10px] font-semibold leading-snug text-sand-300">
               Smooth playback, no buffering
               <br />
               Extracted By @{creditUsername}
@@ -396,7 +396,7 @@ export default function TelegramDeliveryCard({
         </div>
 
         {/* ── HOW IT WORKS ──────────────────────────────────────────────── */}
-        <ol className="w-full space-y-1.5 rounded-2xl border border-white/10 bg-[#090d24]/70 p-3.5">
+        <ol className="surface w-full space-y-1.5 rounded-card p-3.5">
           {[
             "Tap OPEN IN TELEGRAM above.",
             botUsername
@@ -405,10 +405,10 @@ export default function TelegramDeliveryCard({
             "The bot sends the video with live progress, then deletes it automatically.",
           ].map((step, idx) => (
             <li key={step} className="flex items-start gap-2">
-              <span className="mt-0.5 flex h-4 w-4 shrink-0 items-center justify-center rounded-full bg-cyan-500/20 text-[9px] font-black text-cyan-200">
+              <span className="mt-0.5 flex h-4 w-4 shrink-0 items-center justify-center rounded-full bg-ember-500/20 text-[9px] font-black text-ember-300">
                 {idx + 1}
               </span>
-              <span className="text-[11px] font-medium leading-snug text-slate-300">{step}</span>
+              <span className="text-[11px] font-medium leading-snug text-sand-300">{step}</span>
             </li>
           ))}
         </ol>
@@ -419,7 +419,7 @@ export default function TelegramDeliveryCard({
             <button
               type="button"
               onClick={onUseFallback}
-              className="inline-flex items-center gap-1.5 text-[10px] font-bold uppercase tracking-wide text-slate-500 underline-offset-4 transition hover:text-slate-300 hover:underline"
+              className="inline-flex items-center gap-1.5 text-[10px] font-bold uppercase tracking-wide text-sand-500 underline-offset-4 transition hover:text-sand-200 hover:underline"
             >
               <Smartphone className="h-3.5 w-3.5" />
               <span>Play in browser instead (may buffer)</span>

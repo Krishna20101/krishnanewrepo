@@ -132,6 +132,24 @@ export async function POST(req: NextRequest) {
       if (patch.maxPendingPerUser !== undefined) {
         patch.maxPendingPerUser = Math.max(1, Math.min(100, Number(patch.maxPendingPerUser) || 3));
       }
+      // 🔒 CHANNEL JOIN-GATE — sirf valid @username / chat id / t.me link allow
+      if (patch.joinGateEnabled !== undefined) {
+        patch.joinGateEnabled = Boolean(patch.joinGateEnabled);
+      }
+      if (patch.joinGateChannel !== undefined) {
+        const raw = String(patch.joinGateChannel || "").trim();
+        patch.joinGateChannel = /^(@[A-Za-z][A-Za-z0-9_]{3,31}|-?\d{4,20})$/.test(raw)
+          ? raw
+          : "";
+      }
+      if (patch.joinGateInviteUrl !== undefined) {
+        const raw = String(patch.joinGateInviteUrl || "").trim();
+        patch.joinGateInviteUrl = /^https:\/\/(t\.me|telegram\.me|telegram\.dog)\/[A-Za-z0-9_+/=-]{2,80}$/i.test(
+          raw
+        )
+          ? raw
+          : "";
+      }
 
       const config = await saveBotConfig(patch);
 

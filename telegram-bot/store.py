@@ -84,6 +84,16 @@ DEFAULT_CONFIG: Dict[str, Any] = {
     "requestCooldownMin": 5,
     #: Ek user ke kitne PENDING (undelivered) links allow hain.
     "maxPendingPerUser": 3,
+
+    # ── 🔒 CHANNEL JOIN-GATE (v7) — delivery se pehle channel membership ────
+    #: True = student ko pehle channel join karna hoga, warna video nahi milegi.
+    "joinGateEnabled": False,
+    #: Kaunsa channel check karna hai — "@username" ya "-100xxxxxxxxxx".
+    #: ⚠️ Bot ko us channel me ADMIN hona chahiye (member list padhne ke liye).
+    "joinGateChannel": "",
+    #: "Join our channel" button ka link (khaali chhoda to channel username se
+    #: apne aap https://t.me/<username> ban jata hai).
+    "joinGateInviteUrl": "",
 }
 
 STATE_PREFIX = "bot_state"

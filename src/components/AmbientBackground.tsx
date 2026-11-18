@@ -3,24 +3,31 @@
 import React from "react";
 
 /**
- * Ultra-Lightweight Zero-Blur Mobile-Safe GenZ Neon Background!
- * Uses pure static radial-gradients (0px CSS filter blur, 0 continuous GPU repaints on mobile)
- * so even ₹6,000 / 2GB RAM phones NEVER turn black or lag!
+ * Naya ambient canvas — purana "cyber grid + neon radial glow" gaya.
+ * Ab: deep ink-navy base + do soft warm/cool radial wash + halka paper grain.
+ * 0 filter blur, 0 animation → ₹6000 phone par bhi battery/GPU flat.
  */
 export default function AmbientBackground() {
   return (
-    <div
-      aria-hidden="true"
-      className="pointer-events-none fixed inset-0 z-0 overflow-hidden bg-[#050611]"
-      style={{
-        backgroundImage: `
-          radial-gradient(circle at 12% 10%, rgba(0, 240, 255, 0.14) 0%, transparent 42%),
-          radial-gradient(circle at 88% 36%, rgba(139, 92, 246, 0.15) 0%, transparent 45%),
-          radial-gradient(circle at 30% 90%, rgba(244, 63, 94, 0.11) 0%, transparent 42%)
-        `,
-      }}
-    >
-      <div className="absolute inset-0 bg-cyber-grid opacity-70" />
+    <div aria-hidden="true" className="pointer-events-none fixed inset-0 z-0">
+      <div className="absolute inset-0 bg-canvas" />
+      <div className="absolute inset-0 bg-grain opacity-80" />
+      {/* top-right ember wash */}
+      <div
+        className="absolute -right-24 -top-24 h-72 w-72 rounded-full opacity-40"
+        style={{
+          background:
+            "radial-gradient(circle, rgba(222,122,67,0.35) 0%, transparent 70%)",
+        }}
+      />
+      {/* bottom-left sage wash */}
+      <div
+        className="absolute -bottom-28 -left-24 h-80 w-80 rounded-full opacity-30"
+        style={{
+          background:
+            "radial-gradient(circle, rgba(124,186,164,0.3) 0%, transparent 72%)",
+        }}
+      />
     </div>
   );
 }
