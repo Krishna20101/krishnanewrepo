@@ -36,6 +36,11 @@ Clean re-upload:  📺 Title / 📚 Topic / 🎓 Course / Extracted By @krishna8
 
 - **Bot:** `telegram-bot/bot.py` (Telethon) — koi bhi 24×7 host chalega: Render,
   Railway, VPS ya apna PC. Setup: `telegram-bot/README.md`.
+- **Render FREE tier:** wahan "Background Worker" nahi milta, isliye bot khud
+  `PORT` par ek health server kholta hai (`telegram-bot/healthz.py`, stdlib only)
+  → service type **Web Service** rakhein, health check path **`/healthz`**,
+  start command `python telegram-bot/bot.py`. Blueprint `render.yaml` root me
+  ready hai; poori env list `telegram-bot/README.md` §7A me hai.
 - **Source group ka naam kabhi nahi dikhta** — `clean` mode me file download karke
   fresh upload hoti hai (`forward` mode optional hai, usme original caption dikhta hai).
 - **Join-gate:** Admin Panel → Telegram Bot Delivery → *Channel join gate*. Bot ko us

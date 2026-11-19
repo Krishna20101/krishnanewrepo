@@ -1,0 +1,100 @@
+# ============================================================================
+# 🔵 RENDER BLUEPRINT — Study helper Doc · Telegram Delivery Bot
+# ----------------------------------------------------------------------------
+# Ye repo Render se connect hai? Do tareeke hain:
+#
+#  A) MANUAL (jo aapne kiya): Render → New → **Web Service** → repo chunein
+#     → niche diye gaye Build / Start command + env vars bhar dein.
+#        Build command : pip install --upgrade pip && pip install -r telegram-bot/requirements.txt
+#        Start command : python telegram-bot/bot.py
+#        Health check  : /healthz
+#
+#  B) BLUEPRINT: Render → New → **Blueprint** → ye repo chunein → Render ye
+#     file padh kar service khud bana dega (secret values dashboard me bharni
+#     hongi, kyunki `sync: false` hai).
+#
+# ⚠️ Website (Next.js) Vercel par hi rehti hai — yahan SIRF bot deploy hota
+#    hai, isliye build me `npm install` nahi chalta.
+# ⚠️ Service type **Web Service** hi rakhein, "Background Worker" nahi —
+#    wo free tier me nahi milta. bot.py khud `PORT` par ek health server
+#    kholta hai (telegram-bot/healthz.py), isliye Web Service chal jata hai.
+# ============================================================================
+
+services:
+  - type: web
+    name: shd-telegram-bot
+    runtime: python
+    plan: free
+    region: singapore # India ke sabse paas
+    branch: main
+    buildCommand: pip install --upgrade pip && pip install -r telegram-bot/requirements.txt
+    startCommand: python telegram-bot/bot.py
+    healthCheckPath: /healthz
+    autoDeploy: true
+    numInstances: 1 # ⚠️ 1 se zyada instance = do bot ek hi session kholenge → AUTH_KEY_DUPLICATED
+
+    envVars:
+      # ── Telegram API credentials (my.telegram.org) ───────────────────────
+      - key: TELEGRAM_API_ID
+        sync: false
+      - key: TELEGRAM_API_HASH
+        sync: false
+
+      # ── @BotFather bot token ─────────────────────────────────────────────
+      - key: TELEGRAM_BOT_TOKEN
+        sync: false
+
+      # ── USER session (bot ke liye ALAG session: `python bot.py --login`) ──
+      #    Website wali GramJS session string yahan DAALEIN MAT.
+      - key: TG_SESSION_STRING
+        sync: false
+
+      # ── Firebase RTDB (website ke saath shared brain) ────────────────────
+      - key: FIREBASE_PROJECT_ID
+        sync: false
+      - key: FIREBASE_CLIENT_EMAIL
+        sync: false
+      - key: FIREBASE_DATABASE_URL
+        sync: false
+      # Multi-line PEM: Render me paste karte waqt asli newlines chalte hain.
+      - key: FIREBASE_PRIVATE_KEY
+        sync: false
+
+      # ── Website (Vercel) wali EXACT same value — vault decrypt karne ke liye
+      - key: ADMIN_SESSION_SECRET
+        sync: false
+
+      # ── Owner / admin Telegram ids (bot commands inhi ke liye) ───────────
+      - key: OWNER_TG_ID
+        sync: false
+      - key: ADMIN_TG_IDS
+        value: ""
+
+      # ── Free-tier tuning (512 MB RAM / 0.1 CPU / ephemeral disk) ─────────
+      - key: BOT_MAX_PARALLEL
+        value: "1" # ek waqt me ek hi video download+upload
+      - key: BOT_DOWNLOAD_DIR
+        value: /tmp/shd_downloads # writable + ephemeral
+      - key: BOT_STATE_DB
+        value: /tmp/shd_bot_state.db # SQLite fallback (primary Firebase RTDB hai)
+      - key: BOT_SEARCH_BUDGET_SEC
+        value: "120"
+
+      # ── 🔒 Channel join-gate (optional; Admin Panel se bhi set hota hai) ──
+      - key: JOIN_GATE_CHANNEL
+        value: ""
+      - key: JOIN_GATE_INVITE_URL
+        value: ""
+
+      # ── Health server (Render khud PORT deta hai; ye sirf overrides hain) ─
+      #    BOT_HEALTH_TOKEN set karoge to /status token maangega (/healthz public)
+      - key: BOT_HEALTH_TOKEN
+        value: ""
+      - key: BOT_DISABLE_HEALTH
+        value: ""
+      - key: BOT_NO_RETRY
+        value: ""
+
+      # ── App name (bot ke English messages me aata hai) ───────────────────
+      - key: APP_NAME
+        value: Study helper Doc

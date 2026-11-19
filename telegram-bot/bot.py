@@ -78,6 +78,13 @@ from matcher import (  # noqa: E402
     search_query,
     strip_usernames,
 )
+from healthz import (  # noqa: E402
+    RUNTIME_STATUS,
+    health_port_from_env,
+    set_status,
+    start_health_server,
+    stop_health_server,
+)
 from store import DEFAULT_CONFIG, Store, create_store  # noqa: E402
 from vault import check_credentials, resolve_credentials  # noqa: E402
 
@@ -2020,6 +2027,65 @@ def cmd_selftest() -> int:
         "DEFAULT_CONFIG has join-gate keys",
         all(k in DEFAULT_CONFIG for k in ("joinGateEnabled", "joinGateChannel", "joinGateInviteUrl")),
     )
+
+    # ── 🩺 health server (Render "Web Service" port) ───────────────────────
+    import json as _json
+    import urllib.error
+    import urllib.request
+
+    _env_backup = {k: os.environ.get(k) for k in ("PORT", "BOT_HEALTH_PORT", "BOT_DISABLE_HEALTH")}
+
+    def _restore_env() -> None:
+        for key, value in _env_backup.items():
+            if value is None:
+                os.environ.pop(key, None)
+            else:
+                os.environ[key] = value
+
+    try:
+        os.environ.pop("BOT_DISABLE_HEALTH", None)
+        os.environ.pop("BOT_HEALTH_PORT", None)
+        os.environ["PORT"] = "10000"
+        check("PORT from Render is picked up", health_port_from_env() == 10000)
+        os.environ["BOT_HEALTH_PORT"] = "9111"
+        check("BOT_HEALTH_PORT overrides PORT", health_port_from_env() == 9111)
+        os.environ["BOT_DISABLE_HEALTH"] = "1"
+        check("BOT_DISABLE_HEALTH=1 turns it off", health_port_from_env() is None)
+        os.environ.pop("BOT_DISABLE_HEALTH", None)
+        os.environ.pop("BOT_HEALTH_PORT", None)
+        os.environ.pop("PORT", None)
+        check("no PORT set = no server (local/VPS run)", health_port_from_env() is None)
+
+        srv, _thr, port = start_health_server(0, provider=lambda: {"probe": "ok"})
+        check("health server binds a port", srv is not None and port > 0)
+        if srv is not None:
+            try:
+                with urllib.request.urlopen("http://127.0.0.1:%d/healthz" % port, timeout=5) as resp:
+                    payload = _json.loads(resp.read().decode("utf-8"))
+                    code = resp.getcode()
+                check("/healthz -> 200 + ok:true", code == 200 and payload.get("ok") is True)
+                check("/healthz carries live status", payload.get("probe") == "ok" and "uptimeSec" in payload)
+                text = _json.dumps(payload).lower()
+                check(
+                    "health payload leaks no secrets",
+                    not any(
+                        word in text
+                        for word in ("session", "secret", "api_hash", "apihash", "private_key", "token", "password")
+                    ),
+                )
+                try:
+                    with urllib.request.urlopen("http://127.0.0.1:%d/ready" % port, timeout=5) as resp2:
+                        ready_code = resp2.getcode()
+                except urllib.error.HTTPError as exc:
+                    ready_code = exc.code
+                check("/ready is 503 until the bot is running", ready_code == 503)
+                with urllib.request.urlopen("http://127.0.0.1:%d/status" % port, timeout=5) as resp3:
+                    status_payload = _json.loads(resp3.read().decode("utf-8"))
+                check("/status returns JSON", isinstance(status_payload, dict) and status_payload.get("ok") is True)
+            finally:
+                stop_health_server(srv)
+    finally:
+        _restore_env()
     check("string fields handled", (not ok) and why == "used", why)
     check(
         "message object stripped",
@@ -2050,11 +2116,57 @@ def SqliteStoreForTest(path: str) -> Store:  # noqa: N802 (test helper)
 # ─────────────────────────────────────────────────────────────────────────────
 # MAIN
 # ─────────────────────────────────────────────────────────────────────────────
+# ─────────────────────────────────────────────────────────────────────────────
+# 🩺 HEALTH SERVER (Render/Railway "Web Service" ke liye PORT bind karna zaroori)
+# ─────────────────────────────────────────────────────────────────────────────
+_LIVE_BOT: Dict[str, Any] = {"bot": None, "store": None}
+
+
+def bot_health_status() -> Dict[str, Any]:
+    """Health endpoint ka payload — kabhi bhi secret (token/session) nahi deta."""
+    info: Dict[str, Any] = {
+        "service": "shd-telegram-bot",
+        "pid": os.getpid(),
+        "python": sys.version.split()[0],
+    }
+    bot = _LIVE_BOT.get("bot")
+    store = _LIVE_BOT.get("store")
+    if bot is not None:
+        cfg = getattr(bot, "cfg", {}) or {}
+        try:
+            quota_all = int((store.stats() or {}).get("videosLast24h") or 0) if store else 0
+        except Exception:  # noqa: BLE001
+            quota_all = 0
+        info.update(
+            {
+                "botUsername": str(cfg.get("botUsername") or ""),
+                "storage": str(getattr(store, "backend", "")) if store else "",
+                "deliveryMode": str(cfg.get("deliveryMode") or ""),
+                "dailyLimit": cfg.get("dailyLimit"),
+                "autoDeleteHours": cfg.get("autoDeleteHours"),
+                "paused": bool(cfg.get("paused")),
+                "globalDailyLimit": cfg.get("globalDailyLimit"),
+                "videosLast24h": quota_all,
+                "joinGate": (
+                    "on:" + str(cfg.get("joinGateChannel"))
+                    if cfg.get("joinGateEnabled") and str(cfg.get("joinGateChannel") or "").strip()
+                    else "off"
+                ),
+                "queueDepth": int(getattr(bot, "_queue_depth", 0) or 0),
+                "userSessionConnected": bool(
+                    getattr(bot, "user", None) is not None and getattr(bot, "_me_id", 0)
+                ),
+            }
+        )
+    return info
+
+
 async def run_bot() -> int:
     store = create_store()
     creds = resolve_credentials(store)
     ok, message = check_credentials(creds)
     if not ok:
+        set_status(state="fatal", error=str(message)[:400])
         print("\n❌ %s" % message)
         print(
             "\nKahan se laayein:\n"
@@ -2065,21 +2177,27 @@ async def run_bot() -> int:
         )
         return 2
     if not creds.get("sessionString"):
+        set_status(error="TG_SESSION_STRING missing — run: python bot.py --login")
         print(
             "\n⚠️  User session nahi mila. Bot chalu hone ke baad login maangega.\n"
             "   Recommended:  python3 bot.py --login   (alag session, safe)\n"
         )
 
     bot = DeliveryBot(store, creds)
+    _LIVE_BOT["bot"] = bot
+    _LIVE_BOT["store"] = store
     try:
         await bot.start()
     except SystemExit as exc:
         print(exc)
+        set_status(state="fatal", error=str(exc).strip()[:400])
         return int(exc.code or 1)
     except Exception as exc:  # noqa: BLE001
         print("\n❌ Startup failed: %s" % short_error(exc))
         traceback.print_exc()
+        set_status(state="fatal", error=short_error(exc)[:400])
         return 1
+    set_status(state="running", error="", botUsername=str(bot.cfg.get("botUsername") or ""))
 
     print("\n🟢 Bot is running. Press Ctrl+C to stop.\n")
     stop_event = asyncio.Event()
@@ -2102,9 +2220,40 @@ async def run_bot() -> int:
         pass
     finally:
         log("stopping…")
+        set_status(state="stopped")
+        _LIVE_BOT["bot"] = None
+        _LIVE_BOT["store"] = None
         await bot.stop()
         store.close()
     return 0
+
+
+async def supervise_bot(retry_wait_sec: int = 20, max_retries: int = -1) -> int:
+    """Bot ko chalao; fail ho to process ko zinda rakhte hue retry karo.
+
+    Render free tier par ye zaroori hai — warna chhoti si cred galti par service
+    crash-loop karti hai aur health check fail hone par deploy hi reject ho jata
+    hai. Yahan HTTP server chalta rehta hai, `/status` par asli error dikhta hai,
+    aur bot har `retry_wait_sec` baad dubara koshish karta hai (admin ne vault me
+    credentials save kiye to agla attempt apne aap chal padta hai).
+    """
+    attempt = 0
+    while True:
+        attempt += 1
+        set_status(state="starting", attempt=attempt)
+        code = await run_bot()
+        if code == 0:
+            return 0
+        if max_retries >= 0 and attempt > max_retries:
+            set_status(state="fatal", error="Max retries finished (last exit %s)." % code)
+            return code
+        wait = min(300, max(10, retry_wait_sec * attempt))
+        set_status(state="retrying", attempt=attempt)
+        log(
+            "⚠️ Bot start nahi ho paya (exit=%s). %s second me dubara koshish — "
+            "/status par reason dikhega." % (code, wait)
+        )
+        await asyncio.sleep(wait)
 
 
 def main(argv: Optional[List[str]] = None) -> int:
@@ -2128,11 +2277,37 @@ def main(argv: Optional[List[str]] = None) -> int:
     if args.print_session:
         return cmd_print_session()
 
+    # 🩺 Pehle HTTP port bind karo — Render ko deploy ke waqt port chahiye hota
+    #    hai, isliye Telegram/Firebase connect se PEHLE server chalu hota hai.
+    want_port = health_port_from_env()
+    health_server = None
+    if want_port:
+        health_server, _thread, actual_port = start_health_server(
+            want_port, provider=bot_health_status
+        )
+        if health_server is not None:
+            log(
+                "🩺 Health server ON → 0.0.0.0:%d  (paths: /healthz /ready /status)"
+                % actual_port
+            )
+            print(
+                "   Render health check path: /healthz\n"
+                "   Free tier ko jagane ke liye koi external pinger isi path par "
+                "5-10 min me ek baar hit karein."
+            )
+        else:
+            log("⚠️ Health server port %s bind nahi ho paya — bot phir bhi chalega." % want_port)
+
+    no_retry = str(os.environ.get("BOT_NO_RETRY") or "").strip() in ("1", "true", "yes")
     try:
-        return asyncio.run(run_bot())
+        if no_retry:
+            return asyncio.run(run_bot())
+        return asyncio.run(supervise_bot())
     except KeyboardInterrupt:
         print("\n👋 Bot stopped.")
         return 0
+    finally:
+        stop_health_server(health_server)
 
 
 if __name__ == "__main__":

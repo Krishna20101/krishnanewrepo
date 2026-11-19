@@ -247,7 +247,86 @@ state padhti/hai likhti hai.
 
 ## 7. 24×7 chalane ke tareeke
 
-### A) Linux VPS — systemd (recommended)
+### A) Render — FREE Web Service (port ke saath) ⭐
+
+Render ke **free tier me "Background Worker" nahi milta** — sirf **Web Service**
+milta hai, aur Web Service ke liye process ko ek HTTP port bind karna zaroori
+hota hai. Isliye `bot.py` ab khud ek chhota **health server** kholta hai
+(`telegram-bot/healthz.py`, bilkul stdlib — koi nayi dependency nahi). Render ka
+`PORT` env milte hi wo port bind ho jata hai; `PORT` na ho (VPS/local) to server
+hi nahi chalta, bot pehle jaisa chalta hai.
+
+**Render dashboard → New → Web Service → ye repo chunein:**
+
+| Field | Value |
+|---|---|
+| **Runtime** | Python 3 (default theek hai) |
+| **Branch** | `main` |
+| **Root Directory** | khaali chhod dein (poora repo) |
+| **Build command** | `pip install --upgrade pip && pip install -r telegram-bot/requirements.txt` |
+| **Start command** | `python telegram-bot/bot.py` |
+| **Instance type / plan** | **Free** |
+| **Region** | Singapore (India ke sabse paas) |
+| **Health check path** | `/healthz` |
+| **Num instances** | **1** (⚠️ 2 instance = do bot ek hi Telegram session kholenge → `AUTH_KEY_DUPLICATED`) |
+
+Ya agar Blueprint se banana ho to repo ke root me **`render.yaml`** pehle se
+maujood hai (Render → New → Blueprint → ye repo).
+
+**Environment variables (Render → service → Environment):**
+
+| Var | Kahan se | Zaroori? |
+|---|---|---|
+| `TELEGRAM_API_ID` | my.telegram.org → API development tools | ✅ |
+| `TELEGRAM_API_HASH` | wahi | ✅ |
+| `TELEGRAM_BOT_TOKEN` | @BotFather → `/newbot` | ✅ |
+| `TG_SESSION_STRING` | **`python bot.py --login`** se banaya ALAG session (website wali GramJS session NAHI) | ✅ |
+| `FIREBASE_PROJECT_ID` | Firebase console → project settings | ✅ |
+| `FIREBASE_CLIENT_EMAIL` | Firebase → service account key | ✅ |
+| `FIREBASE_DATABASE_URL` | `https://<project>.firebaseio.com` (ya `.firebasedatabase.app`) | ✅ |
+| `FIREBASE_PRIVATE_KEY` | service account JSON ka `private_key` (poora PEM, newlines ke saath) | ✅ |
+| `ADMIN_SESSION_SECRET` | **Vercel wali EXACT same value** — vault decrypt karne ke liye | ✅ |
+| `OWNER_TG_ID` | apni Telegram numeric id (bot commands ke liye) | ✅ |
+| `BOT_MAX_PARALLEL` | `1` (free tier: 512 MB RAM / 0.1 CPU) | recommended |
+| `BOT_DOWNLOAD_DIR` | `/tmp/shd_downloads` (writable, ephemeral) | recommended |
+| `BOT_STATE_DB` | `/tmp/shd_bot_state.db` (SQLite fallback; primary Firebase RTDB hai) | recommended |
+| `JOIN_GATE_CHANNEL` | optional — `@yourchannel` (Admin Panel se bhi set hota hai) | optional |
+| `JOIN_GATE_INVITE_URL` | optional — `https://t.me/+…` private invite | optional |
+| `BOT_HEALTH_TOKEN` | optional — set karoge to `/status` token maangega (`/healthz` public rahega) | optional |
+| `PYTHONUNBUFFERED` | `1` (logs turant aayenge) | recommended |
+
+> `PORT` **khud Render deta hai** — use set mat karna. Health server usi par
+> bind hota hai.
+
+**Deploy ke baad check:**
+
+```bash
+curl https://<your-service>.onrender.com/healthz    # {"ok":true,...}  → 200
+curl https://<your-service>.onrender.com/ready      # bot Telegram se connected? 200/503
+curl https://<your-service>.onrender.com/status     # config + uptime + queue (koi secret nahi)
+```
+
+Admin Panel → **Telegram Bot Delivery** me bot username save karo → status
+**ONLINE** dikhna chahiye.
+
+**⚠️ Free tier ki 3 sachchaiyan (padh lein):**
+
+1. **15 minute HTTP traffic na aaye to service SO jati hai.** Sone par video
+   delivery ruk jati hai. Bachne ka tareeka: koi free external pinger
+   (UptimeRobot / cron-job.org / Better Stack) `/healthz` par **har 5-10 minute**
+   hit kare. (Khud ko ping karna kaam nahi karta — Render bahar ke traffic ko
+   ginti hai.)
+2. **Sote waqt aaye Telegram messages queue me reh jate hain** — bot jaagne par
+   deliver ho jate hain, par student ko der lag sakti hai. Cold start ~30-60 sec.
+3. **Disk ephemeral hai + RAM 512 MB.** Badi files fail ho sakti hain, isliye
+   Admin Panel → Anti-theft me **`maxUploadMb` 300–700** rakhna free tier ke liye
+   theek hai. `/tmp` ka data restart par chala jata hai — koi dikkat nahi,
+   kyunki asli state Firebase RTDB me hai aur deletion queue restart-safe hai.
+
+24×7 chahiye bina pinger ke jhanjhat → **B) VPS** (₹300-500/mo) ya
+**Oracle Cloud free tier** sabse solid hai.
+
+### B) Linux VPS — systemd (sabse reliable)
 
 `/etc/systemd/system/shd-telegram-bot.service`:
 
@@ -276,7 +355,7 @@ sudo systemctl enable --now shd-telegram-bot
 sudo journalctl -u shd-telegram-bot -f     # live logs
 ```
 
-### B) Screen / tmux (quick test)
+### C) Screen / tmux (quick test)
 
 ```bash
 screen -S shdbot
@@ -284,7 +363,7 @@ cd telegram-bot && source .venv/bin/activate && python bot.py
 # detach: Ctrl+A then D   |   reattach: screen -r shdbot
 ```
 
-### C) Docker
+### D) Docker
 
 ```dockerfile
 FROM python:3.12-slim
