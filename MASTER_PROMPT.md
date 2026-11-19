@@ -623,9 +623,14 @@ GET    /api/admin/db-test         RTDB connectivity check
 
 **Recommended (4):**
 `NEXT_PUBLIC_APP_DOMAIN` (= `https://studyhelperdoc.vercel.app`),
-`NEXT_PUBLIC_TELEGRAM_BOT_USERNAME` (bot ka username, `@` ke bina — deep link isi se banta hai),
-`NEXT_PUBLIC_TELEGRAM_CHANNEL_URL` (join link; khaali/placeholder ho to UI me CTA hi nahi dikhta),
-`CORS_ALLOWED_ORIGINS` (comma separated).
+`TELEGRAM_BOT_USERNAME` (**`NEXT_PUBLIC_` prefix ke bina** — code yahi padhta hai; bot ka
+username `@` ke bina, jaise `shd_delivery_bot`),
+`NEXT_PUBLIC_TELEGRAM_URL` (site ke "Join Telegram" CTA ka public link; khaali/placeholder
+ho to CTA hi nahi dikhta), `CORS_ALLOWED_ORIGINS` (comma separated).
+
+> ⚠️ `NEXT_PUBLIC_TELEGRAM_BOT_USERNAME` aur `NEXT_PUBLIC_TELEGRAM_CHANNEL_URL` **kaam ke
+> nahi** — pehla code me padha hi nahi jata, dusra purane JS-bot ke liye tha (delete ho chuka).
+> Vercel me ye pade hon to hata do.
 
 **Optional:** `NEXT_PUBLIC_APP_LOGO_URL`, `NEXT_PUBLIC_DEFAULT_IMAGE_URL`,
 `NEXT_PUBLIC_SITE_URL`, `NEXT_PUBLIC_API_BASE_URL`, `NEXT_PUBLIC_DISABLE_CONTENT_GUARD`,
