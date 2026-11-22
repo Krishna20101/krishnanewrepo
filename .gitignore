@@ -1,18 +1,29 @@
-node_modules
-.next
-out
+# ── Node ─────────────────────────────────────────────────────────────────────
+node_modules/
+npm-debug.log*
+yarn-error.log*
+
+# ── Secrets / local env ──────────────────────────────────────────────────────
 .env
 .env.local
+.env.*.local
 data/local_store.json
-*.tsbuildinfo
-.venv-bot/
-*.session
-*.session-journal
-telegram-bot/bot_state.db
-telegram-bot/downloads/
+/tmp/
 
-# ── Python bot build/runtime artifacts ───────────────────────────────────────
+# ── Python bot runtime artifacts ────────────────────────────────────────────
 __pycache__/
 *.py[cod]
 .venv/
+.venv-bot/
 venv/
+bot/bot_state.db
+bot/bot_state.db-journal
+bot/downloads/
+*.session
+*.session-journal
+
+# ── Editors / OS ────────────────────────────────────────────────────────────
+.DS_Store
+Thumbs.db
+.idea/
+.vscode/

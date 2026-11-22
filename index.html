@@ -1,0 +1,79 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
+    <meta name="theme-color" content="#08090f" />
+    <meta name="description" content="Study helper Doc — courses, lectures and PDFs delivered to your Telegram." />
+    <meta name="robots" content="noindex, nofollow" />
+    <title>Study helper Doc</title>
+    <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'%3E%3Crect width='32' height='32' rx='7' fill='%230c0e17'/%3E%3Cpath d='M9 21.5 16 8l7 13.5-7-3.6z' fill='%23de7a43'/%3E%3C/svg%3E" />
+    <link rel="stylesheet" href="/style.css" />
+  </head>
+  <body>
+    <div class="ambient" aria-hidden="true"></div>
+
+    <header class="topbar">
+      <a class="brand" href="#/">
+        <span class="brand-mark" aria-hidden="true">▤</span>
+        <span class="brand-text">
+          <strong id="brandName">Study helper Doc</strong>
+          <small id="brandTag">Courses · Lectures · PDFs</small>
+        </span>
+      </a>
+
+      <nav class="nav" id="mainNav">
+        <a href="#/courses" data-nav="courses">Courses</a>
+        <a href="#/requests" data-nav="requests">My requests</a>
+        <a href="#/admin" data-nav="admin" id="navAdmin" hidden>Admin</a>
+      </nav>
+
+      <div class="topbar-side">
+        <span class="who" id="whoami"></span>
+        <button class="btn btn-ghost btn-sm" id="authButton" type="button">Login</button>
+      </div>
+    </header>
+
+    <main id="view" class="view" aria-live="polite">
+      <div class="loader"><span></span>Loading…</div>
+    </div>
+
+    <footer class="footer">
+      <span id="footerNote">Study helper Doc</span>
+      <a id="footerTelegram" href="https://t.me/krishna84" target="_blank" rel="noopener noreferrer">Telegram</a>
+    </footer>
+
+    <div class="toasts" id="toasts" aria-live="assertive"></div>
+
+    <!-- ── login sheet ─────────────────────────────────────────────────── -->
+    <div class="sheet" id="loginSheet" hidden>
+      <div class="sheet-card" role="dialog" aria-modal="true" aria-labelledby="loginTitle">
+        <button class="sheet-close" type="button" data-close-sheet aria-label="Close">✕</button>
+        <h2 class="font-display" id="loginTitle">Student login</h2>
+        <p class="muted">Apna login id aur password daaliye. Content sirf login ke baad khulta hai.</p>
+
+        <div class="tabs-mini" id="loginTabs">
+          <button class="tab-mini is-on" type="button" data-tab="student">Student</button>
+          <button class="tab-mini" type="button" data-tab="admin">Admin</button>
+        </div>
+
+        <form id="loginForm" class="form" autocomplete="on">
+          <label class="field">
+            <span id="idLabel">Login id / email / mobile</span>
+            <input id="loginId" name="loginId" type="text" autocomplete="username" required />
+          </label>
+          <label class="field">
+            <span>Password</span>
+            <input id="loginPassword" name="password" type="password" autocomplete="current-password" required />
+          </label>
+          <div class="form-error" id="loginError" hidden></div>
+          <button class="btn btn-primary" type="submit" id="loginSubmit">Login</button>
+        </form>
+      </div>
+    </div>
+
+    <script src="/guard.js"></script>
+    <script src="/app.js"></script>
+    <script src="/admin.js"></script>
+  </body>
+</html>
