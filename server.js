@@ -568,7 +568,8 @@ function publicNode(node, parentPath) {
   const trail = [...(parentPath || []), String(node.title || "")];
   const videoToken = node.tg_video_token || "";
   const pdfToken = node.tg_pdf_token || "";
-  const source = readMediaToken(videoToken);
+  const source = readMediaToken(videoToken) || readMediaToken(pdfToken);
+  const mediaKind = videoToken ? "video" : pdfToken ? "pdf" : "";
   const out = {
     id: String(node.id || ""),
     title: String(node.title || ""),
@@ -576,12 +577,14 @@ function publicNode(node, parentPath) {
     thumbnail: String(node.thumbnail || ""),
     uploadedAt: String(node.uploaded_at || node.uploadedAt || ""),
     path: trail.filter(Boolean),
-    source: String(node.source || (videoToken ? "telegram" : "file")),
+    source: String(node.source || (mediaKind ? "telegram" : "file")),
     hasTelegram: Boolean(videoToken),
+    hasTelegramPdf: Boolean(pdfToken),
+    mediaKind,
     hasPdf: Boolean(pdfToken || node.pdf_link_enc),
-    youtubeOnly: Boolean(node.youtube_url || node.youtubeUrl) && !videoToken,
+    youtubeOnly: Boolean(node.youtube_url || node.youtubeUrl) && !mediaKind,
     sizeMb: source && source.size ? Math.round((source.size / (1024 * 1024)) * 10) / 10 : 0,
-    available: Boolean(videoToken) || Boolean(node.youtube_url || node.youtubeUrl) || type !== "VIDEO",
+    available: Boolean(mediaKind) || Boolean(node.youtube_url || node.youtubeUrl) || type !== "VIDEO",
   };
   if (type !== "VIDEO" && Array.isArray(node.children)) {
     const counts = countNode(node);
@@ -1420,7 +1423,11 @@ app.post("/api/tg/request", requireStudent, async (req, res) => {
     const located = findNodeById(batch.tree, nodeId);
     if (!located) return fail(res, 404, "NODE_NOT_FOUND", "This lecture is not in the course.");
     const node = located.node;
-    const token = String(node.tg_video_token || "");
+    // 📄 Video token na ho to PDF token chalta hai — dono Telegram se hi jaate hain
+    const videoToken = String(node.tg_video_token || "");
+    const pdfToken = String(node.tg_pdf_token || "");
+    const token = videoToken || pdfToken;
+    const mediaKind = videoToken ? "video" : pdfToken ? "pdf" : "";
     if (!token) {
       const youtubeOnly = Boolean(node.youtube_url || node.youtubeUrl);
       return fail(
@@ -1443,6 +1450,7 @@ app.post("/api/tg/request", requireStudent, async (req, res) => {
       uid,
       ip: ipKey(ip),
       title: String(node.title || body.title || "Lecture"),
+      mediaKind,
       courseName: String(batch.name || ""),
       course: String(batch.name || ""),
       batchId,
@@ -1450,6 +1458,7 @@ app.post("/api/tg/request", requireStudent, async (req, res) => {
       topic: located.trail.slice(0, -1).join(" > "),
       folderPath: located.trail.slice(0, -1).join(" > "),
       part: Number(node.part || 0) || undefined,
+      fileType: mediaKind === "pdf" ? "document" : undefined,
       fileSize: Number(source.size || 0) || undefined,
       chatId: source.chatId,
       messageId: source.messageId,
@@ -1591,6 +1600,8 @@ app.post("/api/admin/telegram/attach", requireAdmin, async (req, res) => {
   const nodeId = String(body.nodeId || "");
   const url = String(body.url || "").trim();
   const title = String(body.title || "").trim();
+  // "video" (default) ya "pdf" — pdf par tg_pdf_token banta hai
+  const wantsPdf = String(body.kind || body.type || "video").toLowerCase() === "pdf";
 
   if (!/^[A-Za-z0-9_-]{1,64}$/.test(batchId)) return fail(res, 400, "BAD_BATCH", "Invalid course id.");
   const parsed = parseTelegramPostLink(url);
@@ -1605,10 +1616,11 @@ app.post("/api/admin/telegram/attach", requireAdmin, async (req, res) => {
     const token = makeMediaToken({
       chatId: parsed.chatId,
       messageId: parsed.messageId,
-      kind: "v",
+      kind: wantsPdf ? "p" : "v",
       size: Number(body.size || 0),
       name: title || "",
     });
+    const tokenField = wantsPdf ? "tg_pdf_token" : "tg_video_token";
 
     const meta = {
       chatId: parsed.chatId,
@@ -1628,8 +1640,8 @@ app.post("/api/admin/telegram/attach", requireAdmin, async (req, res) => {
       if (!located) return fail(res, 404, "NODE_NOT_FOUND", "Lecture not found in this course.");
       patchNode = {
         id: targetId,
-        tg_video_token: token,
-        tg_meta: meta,
+        [tokenField]: token,
+        tg_meta: Object.assign({ media: wantsPdf ? "pdf" : "video" }, meta),
         source: "telegram_admin",
       };
       if (title) patchNode.title = title.slice(0, 200);
@@ -1638,16 +1650,16 @@ app.post("/api/admin/telegram/attach", requireAdmin, async (req, res) => {
       if (parentId && !findNodeById(batch.tree, parentId)) {
         return fail(res, 404, "PARENT_NOT_FOUND", "Folder not found in this course.");
       }
-      targetId = `tgv_${parsed.messageId}_${Date.now().toString(36)}`;
+      targetId = `${wantsPdf ? "tgp" : "tgv"}_${parsed.messageId}_${Date.now().toString(36)}`;
       patchNode = {
         id: targetId,
         parent_id: parentId || "-1",
-        title: (title || `Telegram lecture ${parsed.messageId}`).slice(0, 200),
-        type: "VIDEO",
+        title: (title || `Telegram ${wantsPdf ? "PDF" : "lecture"} ${parsed.messageId}`).slice(0, 200),
+        type: wantsPdf ? "FILE" : "VIDEO",
         thumbnail: "",
         uploaded_at: new Date().toISOString(),
-        tg_video_token: token,
-        tg_meta: meta,
+        [tokenField]: token,
+        tg_meta: Object.assign({ media: wantsPdf ? "pdf" : "video" }, meta),
         source: "telegram_admin",
       };
     }
@@ -1664,7 +1676,14 @@ app.post("/api/admin/telegram/attach", requireAdmin, async (req, res) => {
       source: String(existing.source || batch.source || "custom"),
       telegramAttached: true,
     });
-    await writeLog("telegram_attach", { batchId, nodeId: targetId, chatId: parsed.chatId, messageId: parsed.messageId, kind: parsed.kind });
+    await writeLog("telegram_attach", {
+      batchId,
+      nodeId: targetId,
+      chatId: parsed.chatId,
+      messageId: parsed.messageId,
+      kind: parsed.kind,
+      media: wantsPdf ? "pdf" : "video",
+    });
     return json(res, 200, {
       ok: true,
       batchId,
@@ -1672,6 +1691,7 @@ app.post("/api/admin/telegram/attach", requireAdmin, async (req, res) => {
       chatId: parsed.chatId,
       messageId: parsed.messageId,
       channelKind: parsed.kind,
+      media: wantsPdf ? "pdf" : "video",
       deliveryHint: parsed.kind === "public" ? "forward (public source)" : "download + upload (private source)",
     });
   } catch (error) {
@@ -1884,7 +1904,7 @@ const TELEGRAM_NODE_PREFIXES = ["tgv_", "tgp_", "tg_"];
 function isTelegramNode(node) {
   const id = String((node && node.id) || "");
   return (
-    Boolean(node && node.tg_video_token) ||
+    Boolean(node && (node.tg_video_token || node.tg_pdf_token)) ||
     String((node && node.source) || "") === "telegram_auto_sync" ||
     TELEGRAM_NODE_PREFIXES.some((p) => id.startsWith(p))
   );

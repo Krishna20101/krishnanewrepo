@@ -272,6 +272,9 @@
   function addNodeForm(batchId, parentNodeId) {
     const url = h("input", { type: "text", placeholder: "https://t.me/channelname/1234" });
     const title = h("input", { type: "text", placeholder: "Lecture ka naam (optional)" });
+    const kind = h("select", {},
+      h("option", { value: "video" }, "🎬 Video"),
+      h("option", { value: "pdf" }, "📄 PDF"));
     const button = h("button", { class: "btn btn-primary btn-sm", type: "button" }, "➕ Add by URL");
     const note = h("div", { class: "tiny", style: "margin-top:6px" }, "");
     button.addEventListener("click", async () => {
@@ -280,7 +283,7 @@
       try {
         const res = await api("/api/admin/telegram/attach", {
           method: "POST",
-          body: { batchId, parentNodeId: parentNodeId || undefined, url: url.value.trim(), title: title.value.trim() },
+          body: { batchId, parentNodeId: parentNodeId || undefined, url: url.value.trim(), title: title.value.trim(), kind: kind.value },
         });
         note.textContent = `✅ attach ho gaya · ${res.channelKind} source · ${res.deliveryHint}`;
         toast("Telegram link attach ho gaya", "ok");
@@ -294,7 +297,7 @@
     });
     return h("div", { class: "card" },
       h("h3", {}, parentNodeId ? "Is folder me lecture add kijiye" : "Naya lecture add kijiye (top level)"),
-      h("div", { class: "row" }, field("Telegram post link", url), field("Title", title)),
+      h("div", { class: "row" }, field("Telegram post link", url), field("Title", title), field("Media", kind)),
       h("div", { style: "margin-top:10px" }, button),
       note,
       h("p", { class: "tiny", style: "margin:10px 0 0" },
@@ -309,7 +312,9 @@
           h("span", { class: "node-icon" }, isVideo ? "▶" : "🗀"),
           h("span", { class: "node-title" }, node.title || "(untitled)"),
           h("span", { class: "node-side" },
-            node.hasTelegram ? h("span", { class: "chip ok" }, "attached") : h("span", { class: "chip" }, "no source"),
+            node.hasTelegram ? h("span", { class: "chip ok" }, "video attached")
+              : node.hasTelegramPdf ? h("span", { class: "chip ok" }, "pdf attached")
+              : h("span", { class: "chip" }, "no source"),
             node.sizeMb ? h("span", { class: "chip" }, `${node.sizeMb} MB`) : null));
 
         if (isVideo) {
@@ -359,6 +364,10 @@
   function attachForm(batchId, node) {
     const url = h("input", { type: "text", placeholder: "https://t.me/channelname/1234" });
     const title = h("input", { type: "text", value: node.title || "" });
+    const kind = h("select", {},
+      h("option", { value: "video" }, "🎬 Video"),
+      h("option", { value: "pdf" }, "📄 PDF"));
+    if (node.hasTelegramPdf && !node.hasTelegram) kind.value = "pdf";
     const note = h("div", { class: "tiny", style: "margin-top:6px" }, "");
     const button = h("button", { class: "btn btn-primary btn-sm", type: "button" }, "Save link");
     button.addEventListener("click", async () => {
@@ -367,7 +376,7 @@
       try {
         const res = await api("/api/admin/telegram/attach", {
           method: "POST",
-          body: { batchId, nodeId: node.id, url: url.value.trim(), title: title.value.trim() },
+          body: { batchId, nodeId: node.id, url: url.value.trim(), title: title.value.trim(), kind: kind.value },
         });
         note.textContent = `✅ ${res.channelKind} source · ${res.deliveryHint}`;
         toast("Link attach ho gaya", "ok");
@@ -380,7 +389,7 @@
     });
     return h("div", { class: "card", style: "margin:8px 0 8px 32px" },
       h("h3", {}, node.title),
-      h("div", { class: "row" }, field("Telegram post link", url), field("Title", title)),
+      h("div", { class: "row" }, field("Telegram post link", url), field("Title", title), field("Media", kind)),
       h("div", { style: "margin-top:10px" }, button),
       note);
   }

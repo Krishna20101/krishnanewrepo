@@ -177,20 +177,24 @@
     const statusLine = h("div", { class: "tiny", style: "margin:0 0 8px" }, "");
 
     function nodeRow(node, depth) {
-      const isVideo = String(node.type || "").toUpperCase() === "VIDEO";
-      const row = h("div", { class: "node" + (isVideo ? " is-video" : "") },
-        h("span", { class: "node-icon" }, isVideo ? "▶" : "🗀"),
+      const upperType = String(node.type || "").toUpperCase();
+      const isVideo = upperType === "VIDEO";
+      const isFile = upperType === "FILE" || upperType === "PDF";
+      const row = h("div", { class: "node" + (isVideo || isFile ? " is-video" : "") },
+        h("span", { class: "node-icon" }, isVideo ? "▶" : isFile ? "📄" : "🗀"),
         h("span", { class: "node-title", title: node.title }, node.title || "(untitled)"),
         h("span", { class: "node-side" },
-          isVideo
+          isVideo || isFile
             ? (node.hasTelegram
               ? h("span", { class: "chip ember" }, "telegram")
-              : node.youtubeOnly
-                ? h("span", { class: "chip warn" }, "jaldi aayega")
-                : h("span", { class: "chip" }, "soon"))
-            : h("span", { class: "chip" }, `${node.videosCount || 0} 🎬`)));
+              : node.hasTelegramPdf
+                ? h("span", { class: "chip ember" }, "pdf")
+                : node.youtubeOnly
+                  ? h("span", { class: "chip warn" }, "jaldi aayega")
+                  : h("span", { class: "chip" }, "soon"))
+            : h("span", { class: "chip" }, `${node.videosCount || 0} 🎬 · ${node.filesCount || 0} 📄`)));
 
-      if (isVideo) {
+      if (isVideo || isFile) {
         row.addEventListener("click", () => {
           location.hash = `#/watch/${encodeURIComponent(batch.id)}/${encodeURIComponent(node.id)}`;
         });
@@ -222,7 +226,7 @@
       const walk = (nodes, trail) => {
         for (const node of nodes || []) {
           const next = [...trail, node.title || ""];
-          if (String(node.type || "").toUpperCase() === "VIDEO") {
+          if (["VIDEO", "FILE", "PDF"].includes(String(node.type || "").toUpperCase())) {
             if (String(node.title || "").toLowerCase().includes(q) || next.join(" ").toLowerCase().includes(q)) {
               hits.push({ node, trail: next });
             }
@@ -233,9 +237,9 @@
       statusLine.textContent = `${hits.length} result`;
       hits.slice(0, 200).forEach(({ node, trail }) => {
         const row = h("div", { class: "node is-video" },
-          h("span", { class: "node-icon" }, "▶"),
+          h("span", { class: "node-icon" }, node.hasTelegramPdf && !node.hasTelegram ? "📄" : "▶"),
           h("span", { class: "node-title" }, node.title),
-          h("span", { class: "node-side" }, node.hasTelegram ? h("span", { class: "chip ember" }, "telegram") : h("span", { class: "chip" }, "soon")));
+          h("span", { class: "node-side" }, node.hasTelegram ? h("span", { class: "chip ember" }, "telegram") : node.hasTelegramPdf ? h("span", { class: "chip ember" }, "pdf") : h("span", { class: "chip" }, "soon")));
         row.addEventListener("click", () => {
           location.hash = `#/watch/${encodeURIComponent(batch.id)}/${encodeURIComponent(node.id)}`;
         });
@@ -273,7 +277,8 @@
       h("span", {}, trail.slice(0, -1).join(" › ") || "—")));
 
     const quotaLine = h("div", { class: "quota-line" }, "");
-    const button = h("button", { class: "play-btn", type: "button" }, "▶ Open in Telegram");
+    const isPdfOnly = !node.hasTelegram && Boolean(node.hasTelegramPdf);
+    const button = h("button", { class: "play-btn", type: "button" }, isPdfOnly ? "📄 Open PDF in Telegram" : "▶ Open in Telegram");
     const poster = h("div", { class: "poster" },
       node.thumbnail
         ? h("img", { src: node.thumbnail, alt: "", referrerpolicy: "no-referrer" })
@@ -309,7 +314,7 @@
       quotaLine.textContent = "";
     }
 
-    if (!node.hasTelegram) {
+    if (!node.hasTelegram && !node.hasTelegramPdf) {
       button.disabled = true;
       button.textContent = "Not available yet";
       statusBox.appendChild(
@@ -362,7 +367,7 @@
       } finally {
         busy = false;
         button.disabled = false;
-        button.textContent = "▶ Open in Telegram";
+        button.textContent = isPdfOnly ? "📄 Open PDF in Telegram" : "▶ Open in Telegram";
         try {
           const quota = await api("/api/tg/quota");
           quotaLine.textContent = `${quota.remaining} of ${quota.limit} left today · resets ${quota.resetTimeIST}`;
