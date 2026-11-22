@@ -1,10 +1,14 @@
 # 📚 Study helper Doc — v5 (clean rebuild)
 
 Courses browser + **Telegram video delivery**. Website video **play nahi karti,
-download nahi karti** — watch page par sirf thumbnail aur ek button hota hai:
+download nahi karti** — watch page ek **video-player jaisa frame** hai (thumbnail +
+HUD), aur bich me **sirf EK gol ▶ button**:
 
 > **▶ Open in Telegram** → bot khulta hai → channel-join check → video aapke
 > Telegram chat me → **2 ghante baad auto-delete**
+>
+> Koi player controls nahi, koi share/turn-screen/notes buttons nahi — sirf wahi
+> ek button jo Telegram kholta hai.
 
 ```
 ┌──────────────┐   POST /api/tg/request    ┌─────────────────┐
@@ -120,7 +124,9 @@ par chalta hai — testing ke liye theek, production ke liye nahi.
 
 ---
 
-## 4 · Deploy (Render, free)
+## 4 · Deploy
+
+### 4a · Render (recommended, free)
 
 `render.yaml` blueprint hai — repo connect karte hi dono services ban jaati hain.
 
@@ -144,6 +150,25 @@ Site: `FIREBASE_*`, `ADMIN_EMAIL`, `ADMIN_PASSWORD`, `TELEGRAM_BOT_USERNAME`.
 
 > ⚠️ Website ko ab `TELEGRAM_API_ID/API_HASH/SESSION_STRING` ki zaroorat **nahi** —
 > scanning aur delivery sirf bot karta hai.
+
+### 4b · Vercel (agar purana domain wahin hai)
+
+Repo ab **Vercel par bhi** deploy hota hai — `vercel.json` + `api/index.js` (3-line
+wrapper jo wahi Express app ko serverless function ke roop me export karta hai).
+
+- **Static layer**: `index.html` (root) + `site/*` Vercel ke CDN se seedha serve hote
+  hain. Assets `/site/style.css` jaise paths par hain (local express bhi wahi serve
+  karta hai, isliye dono jagah same build chalta hai).
+- **API layer**: `/api/*` → `api/index.js` (Express + Firebase RTDB).
+- **Secrets**: Vercel dashboard me wahi vars — `FIREBASE_*`, `ADMIN_SESSION_SECRET`,
+  `ADMIN_EMAIL`, `ADMIN_PASSWORD`, `TELEGRAM_BOT_USERNAME`.
+- **Raw files protected**: `/data/*`, `/server.js`, `/bot/*`, `package*.json`,
+  `render.yaml`, `database.rules.json` → rewrite se 403 (`api/deny.js`).
+- Dashboard me framework: **Other / None** (koi build command zaroori nahi).
+
+> Bot **hamesha Render par** chalega (Vercel par 24×7 daemon possible nahi). Site
+> Vercel par ho ya Render par — dono ek hi Firebase RTDB se judte hain, isliye
+> `ADMIN_SESSION_SECRET` har jagah **same** rakhiye.
 
 ---
 

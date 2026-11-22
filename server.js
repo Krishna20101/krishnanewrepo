@@ -261,7 +261,11 @@ const LOCAL_STORE_PATH = env("LOCAL_STORE_PATH", path.join("/tmp", "shd_local_st
 let rtdb = null;
 let firebaseReady = false;
 
+let firebaseAttempted = false;
+
 function initFirebase() {
+  if (firebaseAttempted) return firebaseReady; // serverless me double-call safe
+  firebaseAttempted = true;
   const projectId = env("FIREBASE_PROJECT_ID", "");
   const clientEmail = env("FIREBASE_CLIENT_EMAIL", "");
   const key = privateKey();
@@ -271,7 +275,7 @@ function initFirebase() {
 
   if (!projectId || !clientEmail || !key) {
     console.warn("⚠️  Firebase creds missing → local JSON store (" + LOCAL_STORE_PATH + ")");
-    return;
+    return false;
   }
   try {
     const admin = require("firebase-admin");
@@ -292,6 +296,7 @@ function initFirebase() {
     console.error("❌ Firebase init failed → local JSON store:", error.message);
     rtdb = null;
   }
+  return firebaseReady;
 }
 
 /* ── local file store (same path semantics, "/" separated) ───────────────── */
@@ -2130,6 +2135,9 @@ app.delete("/api/admin/batches/:id", requireAdmin, async (req, res) => {
    SECTION 10 · static site + start
    ============================================================================= */
 
+// assets dono tarah serve hote hain: /site/style.css (Vercel static layer jaisa)
+// aur /style.css (local express) — index.html /site/* use karta hai.
+app.use("/site", express.static(path.join(HERE, "site"), { index: false, maxAge: IS_PROD ? "1h" : 0 }));
 app.use(express.static(path.join(HERE, "site"), { index: false, maxAge: IS_PROD ? "1h" : 0 }));
 
 app.get(["/", "/index.html"], (req, res) => {
@@ -2327,6 +2335,7 @@ if (require.main === module) {
 module.exports = {
   app,
   selfTest,
+  initFirebase,
   parseTelegramPostLink,
   makeMediaToken,
   readMediaToken,

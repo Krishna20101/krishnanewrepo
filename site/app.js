@@ -278,17 +278,29 @@
 
     const quotaLine = h("div", { class: "quota-line" }, "");
     const isPdfOnly = !node.hasTelegram && Boolean(node.hasTelegramPdf);
-    const button = h("button", { class: "play-btn", type: "button" }, isPdfOnly ? "📄 Open PDF in Telegram" : "▶ Open in Telegram");
-    const poster = h("div", { class: "poster" },
+    const playIcon = isPdfOnly ? "📄" : "▶";
+    const playLabel = isPdfOnly ? "Open PDF in Telegram" : "Open in Telegram";
+
+    // 🎬 PLAYER-JAISA FRAME: thumbnail + vignette + niche HUD (title/size) +
+    //    decorative progress line. Bich me SIRF EK control — gol ▶ button.
+    const button = h("button", { class: "player-play", type: "button", "aria-label": playLabel },
+      h("span", { class: "player-play-icon" }, playIcon));
+    const labelEl = h("div", { class: "player-label" }, `${playIcon} ${playLabel}`);
+    const player = h("div", { class: "player" },
       node.thumbnail
-        ? h("img", { src: node.thumbnail, alt: "", referrerpolicy: "no-referrer" })
-        : h("div", { class: "poster-fallback" }, node.title),
-      h("div", { class: "play-overlay" }, button));
+        ? h("img", { class: "player-thumb", src: node.thumbnail, alt: "", referrerpolicy: "no-referrer" })
+        : h("div", { class: "player-fallback" }, node.title),
+      h("div", { class: "player-shade" }),
+      h("div", { class: "player-center" }, button, labelEl),
+      h("div", { class: "player-hud" },
+        h("span", { class: "player-title" }, node.title),
+        h("span", { class: "player-meta" }, isPdfOnly ? (node.sizeMb ? `${node.sizeMb} MB · PDF` : "PDF") : (node.sizeMb ? `${node.sizeMb} MB` : "VIDEO"))),
+      h("div", { class: "player-bar" }, h("i", {})));
 
     const statusBox = h("div", {});
 
     target.appendChild(h("div", { class: "watch" },
-      h("div", {}, poster, quotaLine, statusBox),
+      h("div", {}, player, quotaLine, statusBox),
       h("div", { class: "card" },
         h("h2", { class: "font-display" }, node.title),
         h("dl", { class: "kv", style: "margin:12px 0 0" },
@@ -316,7 +328,8 @@
 
     if (!node.hasTelegram && !node.hasTelegramPdf) {
       button.disabled = true;
-      button.textContent = "Not available yet";
+      player.classList.add("is-off");
+      labelEl.textContent = "Not available yet";
       statusBox.appendChild(
         h("div", { class: "notice warn", style: "margin-top:12px" },
           node.youtubeOnly
@@ -326,11 +339,15 @@
     }
 
     let busy = false;
+    player.addEventListener("click", (event) => {
+      if (event.target.closest("button")) return;
+      if (!button.disabled) button.click();
+    });
     button.addEventListener("click", async () => {
       if (busy) return;
       busy = true;
       button.disabled = true;
-      button.textContent = "Requesting…";
+      labelEl.textContent = "Requesting…";
       clear(statusBox);
       try {
         const res = await api("/api/tg/request", {
@@ -367,7 +384,7 @@
       } finally {
         busy = false;
         button.disabled = false;
-        button.textContent = isPdfOnly ? "📄 Open PDF in Telegram" : "▶ Open in Telegram";
+        labelEl.textContent = `${playIcon} ${playLabel}`;
         try {
           const quota = await api("/api/tg/quota");
           quotaLine.textContent = `${quota.remaining} of ${quota.limit} left today · resets ${quota.resetTimeIST}`;
