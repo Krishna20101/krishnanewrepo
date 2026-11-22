@@ -1,100 +1,99 @@
-# ============================================================================
-# 🔵 RENDER BLUEPRINT — Study helper Doc · Telegram Delivery Bot
-# ----------------------------------------------------------------------------
-# Ye repo Render se connect hai? Do tareeke hain:
+# =============================================================================
+# 🚀 Render Blueprint — Study helper Doc
+# -----------------------------------------------------------------------------
+# Do Web Services (free tier):
+#   1. studyhelper-site  → Node server (index.html + site/ + /api/*)
+#   2. studyhelper-bot   → Python Telegram bot (bot/bot.py) + /healthz
 #
-#  A) MANUAL (jo aapne kiya): Render → New → **Web Service** → repo chunein
-#     → niche diye gaye Build / Start command + env vars bhar dein.
-#        Build command : pip install --upgrade pip && pip install -r telegram-bot/requirements.txt
-#        Start command : python telegram-bot/bot.py
-#        Health check  : /healthz
-#
-#  B) BLUEPRINT: Render → New → **Blueprint** → ye repo chunein → Render ye
-#     file padh kar service khud bana dega (secret values dashboard me bharni
-#     hongi, kyunki `sync: false` hai).
-#
-# ⚠️ Website (Next.js) Vercel par hi rehti hai — yahan SIRF bot deploy hota
-#    hai, isliye build me `npm install` nahi chalta.
-# ⚠️ Service type **Web Service** hi rakhein, "Background Worker" nahi —
-#    wo free tier me nahi milta. bot.py khud `PORT` par ek health server
-#    kholta hai (telegram-bot/healthz.py), isliye Web Service chal jata hai.
-# ============================================================================
-
+# GitHub repo connect karne par Render yeh file padh kar dono services bana dega.
+# Secrets (BOT_TOKEN, FIREBASE_*, ADMIN_*) dashboard me bharni hain — `sync: false`.
+# =============================================================================
 services:
+  # ── 1) Website + API ─────────────────────────────────────────────────────
   - type: web
-    name: shd-telegram-bot
-    runtime: python
+    name: studyhelper-site
+    runtime: node
     plan: free
-    region: singapore # India ke sabse paas
-    branch: main
-    buildCommand: pip install --upgrade pip && pip install -r telegram-bot/requirements.txt
-    startCommand: python telegram-bot/bot.py
-    healthCheckPath: /healthz
+    region: singapore
+    rootDir: .
+    buildCommand: npm ci --omit=dev || npm install --omit=dev
+    startCommand: node server.js
+    healthCheckPath: /api/health
     autoDeploy: true
-    numInstances: 1 # ⚠️ 1 se zyada instance = do bot ek hi session kholenge → AUTH_KEY_DUPLICATED
-
+    numInstances: 1
     envVars:
-      # ── Telegram API credentials (my.telegram.org) ───────────────────────
-      - key: TELEGRAM_API_ID
-        sync: false
-      - key: TELEGRAM_API_HASH
-        sync: false
-
-      # ── @BotFather bot token ─────────────────────────────────────────────
-      - key: TELEGRAM_BOT_TOKEN
-        sync: false
-
-      # ── USER session (bot ke liye ALAG session: `python bot.py --login`) ──
-      #    Website wali GramJS session string yahan DAALEIN MAT.
-      - key: TG_SESSION_STRING
-        sync: false
-
-      # ── Firebase RTDB (website ke saath shared brain) ────────────────────
+      - key: NODE_VERSION
+        value: 20.11.1
+      - key: NODE_ENV
+        value: production
+      # PORT Render inject karta hai — kabhi manually set na karein
+      - key: HOST
+        value: 0.0.0.0
       - key: FIREBASE_PROJECT_ID
         sync: false
       - key: FIREBASE_CLIENT_EMAIL
         sync: false
-      - key: FIREBASE_DATABASE_URL
-        sync: false
-      # Multi-line PEM: Render me paste karte waqt asli newlines chalte hain.
       - key: FIREBASE_PRIVATE_KEY
         sync: false
-
-      # ── Website (Vercel) wali EXACT same value — vault decrypt karne ke liye
+      - key: FIREBASE_DATABASE_URL
+        sync: false
       - key: ADMIN_SESSION_SECRET
         sync: false
+      - key: ADMIN_EMAIL
+        sync: false
+      - key: ADMIN_PASSWORD
+        sync: false
+      - key: TELEGRAM_BOT_USERNAME
+        sync: false
+      - key: TG_MEDIA_TOKEN_TTL_DAYS
+        value: "30"
+      - key: CORS_ALLOWED_ORIGINS
+        sync: false
 
-      # ── Owner / admin Telegram ids (bot commands inhi ke liye) ───────────
+  # ── 2) Telegram bot (24×7 daemon, Web Service ke roop me) ────────────────
+  - type: web
+    name: studyhelper-bot
+    runtime: python
+    plan: free
+    region: singapore
+    rootDir: .
+    buildCommand: pip install --upgrade pip && pip install -r bot/requirements.txt
+    startCommand: python bot/bot.py
+    healthCheckPath: /healthz
+    autoDeploy: true
+    numInstances: 1          # ⚠️ ek hi instance — 2 session = AUTH_KEY_DUPLICATED
+    envVars:
+      - key: PYTHON_VERSION
+        value: 3.11.6
+      - key: PYTHONUNBUFFERED
+        value: "1"
+      # PORT Render inject karta hai (health server isi par bind hota hai)
+      - key: TELEGRAM_API_ID
+        sync: false
+      - key: TELEGRAM_API_HASH
+        sync: false
+      - key: TELEGRAM_BOT_TOKEN
+        sync: false
+      - key: TG_SESSION_STRING
+        sync: false
+      - key: FIREBASE_PROJECT_ID
+        sync: false
+      - key: FIREBASE_CLIENT_EMAIL
+        sync: false
+      - key: FIREBASE_PRIVATE_KEY
+        sync: false
+      - key: FIREBASE_DATABASE_URL
+        sync: false
+      # ⚠️ website wali SAME secret — warna encrypted tokens decrypt nahi honge
+      - key: ADMIN_SESSION_SECRET
+        sync: false
       - key: OWNER_TG_ID
         sync: false
-      - key: ADMIN_TG_IDS
-        value: ""
-
-      # ── Free-tier tuning (512 MB RAM / 0.1 CPU / ephemeral disk) ─────────
       - key: BOT_MAX_PARALLEL
-        value: "1" # ek waqt me ek hi video download+upload
+        value: "1"
       - key: BOT_DOWNLOAD_DIR
-        value: /tmp/shd_downloads # writable + ephemeral
+        value: /tmp/shd_downloads
       - key: BOT_STATE_DB
-        value: /tmp/shd_bot_state.db # SQLite fallback (primary Firebase RTDB hai)
-      - key: BOT_SEARCH_BUDGET_SEC
-        value: "120"
-
-      # ── 🔒 Channel join-gate (optional; Admin Panel se bhi set hota hai) ──
-      - key: JOIN_GATE_CHANNEL
-        value: ""
-      - key: JOIN_GATE_INVITE_URL
-        value: ""
-
-      # ── Health server (Render khud PORT deta hai; ye sirf overrides hain) ─
-      #    BOT_HEALTH_TOKEN set karoge to /status token maangega (/healthz public)
+        value: /tmp/shd_bot_state.db
       - key: BOT_HEALTH_TOKEN
-        value: ""
-      - key: BOT_DISABLE_HEALTH
-        value: ""
-      - key: BOT_NO_RETRY
-        value: ""
-
-      # ── App name (bot ke English messages me aata hai) ───────────────────
-      - key: APP_NAME
-        value: Study helper Doc
+        sync: false

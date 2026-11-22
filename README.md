@@ -1,215 +1,217 @@
-# 📘 Study helper Doc — Portal v4 "Slate & Ember"
+# 📚 Study helper Doc — v5 (clean rebuild)
 
-**What changed in v4 (different look, Telegram-only video, stronger sync):**
+Courses browser + **Telegram video delivery**. Website video **play nahi karti,
+download nahi karti** — watch page par sirf thumbnail aur ek button hota hai:
 
-| # | Change |
-|---|---|
-| 1 | **Pura naya theme** — neon cyan/purple "cyberpunk" gaya. Ab deep ink-navy canvas + warm copper accents + serif display headings. Koi glow, koi cyber grid, koi glass blur nahi. |
-| 2 | **Bottom dock hataya** — Wishlist aur Downloads ke floating tabs gaye. Downloads ab **header ke top-right corner** me icon button hai. Wishlist feature remove (purana linker `/` par redirect). |
-| 3 | **Home page simplified** — login ke baad seedha course list. Search ab plain field hai (corner-bracket animation hataya). |
-| 4 | **Naye course tiles** — flat surface, left ember rail, corner index number, hairline meta row, arrow affordance. Thumbnail hover par depth (koi neon/glow nahi). |
-| 5 | **Batch screen** — SUBJECTS / TEST / **LIVE hataya**. Ab sirf **Lectures** aur **Notes** ka segmented switch (ember underline). PDF rows document-style, video rows list-style. |
-| 6 | **Video delivery Telegram bot se** — Cloudflare Worker/Vercel streaming ki jagah ab `/watch` par **Open in Telegram** panel. Deep-link single-use hai, account se bind hota hai aur daily quota + channel join-gate ke andar chalta hai. |
-| 7 | **Content guard** — right-click, text-copy, drag, DevTools/print shortcuts block + print CSS. (Server-side protection asli hai; ye casual copying rokta hai.) |
-| 8 | **Caption parser 10x better** — Hindi labels (टाइटल/बैच/विषय), emoji/bullets, `【Title】`, `|` single-line captions, `Lecture Name =` — sab parse hote hain. |
-| 9 | **Sync limit 1500 → 2500** (max 10000) + 400-message windows with retry → 1700-2000+ videos wale groups ek hi baar me sync. |
-
----
-
-## 🤖 Telegram Delivery Bot (Python / Telethon)
-
-`/watch` screen par video player ki jagah:
+> **▶ Open in Telegram** → bot khulta hai → channel-join check → video aapke
+> Telegram chat me → **2 ghante baad auto-delete**
 
 ```
-Open in Telegram  →  website request banati hai (Firebase RTDB: tg_requests/<id>)
-        ↓            t.me/<bot>?start=<requestId>   (single-use, account-bound)
-Bot 🔒 join-gate check (agar ON hai) → member nahi to "Join our channel" + "I have joined"
-        ↓ member hai / gate off
-Bot 🛡️ anti-theft gate → global 24h breaker → link used? → dusre account ka link?
-        ↓ clear
-Bot daily quota check (12/24h default) → lecture ko course groups me DHOONDHTA hai
-        ↓  (title + topic + course name + file size se match, source kabhi leak nahi hota)
-Clean re-upload:  📺 Title / 📚 Topic / 🎓 Course / Extracted By @krishna84
-        ↓
-2 ghante baad video + notice auto-delete (restart-safe deletion queue)
+┌──────────────┐   POST /api/tg/request    ┌─────────────────┐
+│  index.html  │ ────────────────────────► │    server.js    │  Node + Express
+│  site/*.js   │ ◄──── requestId, link ─── │  (Render web)   │  Firebase RTDB
+└──────┬───────┘                           └────────┬────────┘
+       │  t.me/<bot>?start=req_<id>                 │ tg_requests/<id>
+       ▼                                            ▼
+┌──────────────┐    video + caption + auto-delete  ┌─────────────────┐
+│   Telegram   │ ◄──────────────────────────────── │   bot/bot.py    │  Python
+│     user     │                                   │  (Render web)   │  Telethon
+└──────────────┘                                   └─────────────────┘
 ```
 
-- **Bot:** `telegram-bot/bot.py` (Telethon) — koi bhi 24×7 host chalega: Render,
-  Railway, VPS ya apna PC. Setup: `telegram-bot/README.md`.
-- **Render FREE tier:** wahan "Background Worker" nahi milta, isliye bot khud
-  `PORT` par ek health server kholta hai (`telegram-bot/healthz.py`, stdlib only)
-  → service type **Web Service** rakhein, health check path **`/healthz`**,
-  start command `python telegram-bot/bot.py`. Blueprint `render.yaml` root me
-  ready hai; poori env list `telegram-bot/README.md` §7A me hai.
-- **Source group ka naam kabhi nahi dikhta** — `clean` mode me file download karke
-  fresh upload hoti hai (`forward` mode optional hai, usme original caption dikhta hai).
-- **Join-gate:** Admin Panel → Telegram Bot Delivery → *Channel join gate*. Bot ko us
-  channel me **ADMIN** banayein; check fail hone par gate **fail-open** rehta hai
-  (galat config ki saza student ko nahi milti, warning bot log me aati hai).
-- **Anti-theft:** har link single-use + pehle Telegram account se bind, site-wide
-  24h circuit breaker, per-login 15/10min aur per-IP 30/10min throttle, daily quota.
-- **YouTube embed playback hata diya gaya hai** — jis lecture me Telegram video file
-  nahi hai wahan English "content unavailable, will be uploaded soon" card dikhta hai.
-- **Purge:** Admin Panel → Telegram → *Danger zone* se saara Telegram-sourced data
-  (batch links, sync records, group registry, bot requests/state) ek click me saaf
-  hota hai — manually banaye courses aur real `data/batches/*.json` files safe rehti hain.
-- Site env vars: `NEXT_PUBLIC_TELEGRAM_BOT_USERNAME`, `NEXT_PUBLIC_TELEGRAM_CHANNEL_URL`.
-- ⚠️ Bot ke env me `ADMIN_SESSION_SECRET` **Vercel wali exact same value** honi
-  chahiye — isi se encrypted media vault decrypt hota hai.
+---
+
+## 1 · Repository (chhoti aur saaf)
+
+```
+index.html              website shell (root)
+server.js               Express server: static + /api/* + Firebase RTDB
+package.json            express, firebase-admin, dotenv
+render.yaml             Render blueprint (site + bot, dono free Web Service)
+database.rules.json     Firebase RTDB rules (client read/write: false — sab server se)
+.env.example            saare env vars (copy → .env.local)
+README.md               yeh file
+
+site/                   website ka saara js/css (koi sub-folder nahi)
+  style.css             v5 "Slate & Ember" theme
+  guard.js              auth guard, api wrapper, toasts
+  app.js                student pages (home, courses, tree, watch, requests)
+  admin.js              admin panel (8 tabs)
+
+bot/                    Telegram bot (sirf 2 files)
+  bot.py                vault + store + matcher + health + bot — ek file
+  requirements.txt      telethon, firebase-admin deps, cryptography
+
+data/batches/*.json     real course data — READ ONLY (kabhi modify nahi hota)
+```
+
+Website me **koi player, koi download, koi Cloudflare worker, koi GramJS session
+nahi**. Purana streaming system poora hata diya gaya hai.
 
 ---
 
-# 📘 Study helper Doc — Complete A-to-Z Portal (v3 "Smooth Edition")
+## 2 · Rules (jo hamesha follow hote hain)
 
-**Live domain:** `https://studyhelperdoc.vercel.app`
-**Stack:** Next.js 14 (App Router) + Firebase RTDB + GramJS (Telegram MTProto) + Cloudflare Worker (free edge cache)
-**Cost:** ₹0 (Vercel Hobby + Cloudflare Free + Firebase Free + Telegram Free)
-
----
-
-## ✨ Is Version (v3) Me Kya-Kya Naya / Fix Hua
-
-| # | Problem (aapne batayi) | Fix |
-| --- | --- | --- |
-| 1 | `406: AUTH_KEY_DUPLICATED` par sync fail | Admin scan **ephemeral** (kaam khatam = 0.1s me disconnect), thumbnails user-session se **hata diye**, aur **@BotFather Bot Token** streaming add ki (har container ki apni temporary `auth_key` = 0% collision). Channel ab **PRIVATE** rakh sakte hain (bot ko ADMIN bana dein). |
-| 2 | Video "jhal-jhal / andar ka character hilta" | **Byte-exact streaming engine**: Telegram se short/adhura block aane par ab wo silently aage nahi badhta — fill-loop + retry hota hai, warna browser us range ko dubara maangta hai. Purane code me beech ke bytes miss ho jate the (Chrome frames aage-piche phenkta tha). |
-| 3 | Cloudflare par zyada jhal-jhal | **Worker v3**: har 2MB block ki length + `Content-Range` verify hoti hai, **adhura block kabhi cache nahi hota** (pehle 7 din tak corrupt block serve hota rehta tha!). Sath hi **16MB range-cap** — Free plan ke 50-subrequest limit me ab kabhi fail nahi hota. |
-| 4 | Vercel par 400MB video stream toot jata | Har 206 response max **32MB** (Vercel Hobby ~60s limit safe). Chrome agla slice khud maang leta hai = playback continuous. |
-| 5 | Player atakta / black screen | Naya **SmartVideoPlayer**: Gap-Jump controller (buffer hole ke paar jump), Stall watchdog (3s nudge, 6.5s reload), Edge→Direct auto-failover, resume-from-last-position, engine badge (`BOT STREAM • EDGE HIT • Buffer 42s`). |
-| 6 | Caption-only YouTube lectures (`Index/Title/Batch/Link: https://youtu.be/...`) sync nahi hote the | Scanner ab **bina file wale messages** bhi padhta hai. Agar caption me `Title:` + (`Batch:`/`Topic:`/`Course:`) + YouTube link hai to wo lecture **automatic YouTube Embed** ban jata hai (Add New + JSON Merge dono me). `Error: 'utf-8' codec...` jaise extractor crash-logs caption se **saaf** ho jate hain. |
-| 7 | Sirf `JSON Merge` chunne par neeche list nahi aati thi | Ab **har sync ka record hamesha save hota hai** — success, partial ya error. Neeche `Synced Telegram Groups` list hamesha dikhti hai (status badge + reason + `Re-Sync` + `Open Course` + `Delete Course` + `Remove Record`). |
-| 8 | PDF "kahi kahi khulta nahi", ek saath pura load hota tha | Naya **ProgressivePdfViewer** (pdf.js range requests): pehla page ~300-500KB me khulta hai, baaki pages **scroll par** aate hain. Door ke pages ka canvas RAM se free (max 8 live canvas) → low-RAM phone par bhi smooth. Zoom, page-jump, fullscreen, `Please wait, page N load ho raha hai...` |
-| 9 | Download browser me chala jata tha (koi bhi copy kar sakta tha) | Ab **In-App Offline Vault** (IndexedDB): file phone ke Downloads folder me **nahi** jati. Lecture website ke andar hi save hota hai aur **internet band hone par bhi** wahi se chalta hai. Download **resumable** (Pause/Resume), chunk-wise disk write (RAM flat), storage meter `/downloads` par. |
-| 10 | Login system alag rakhna tha | Poora student login ek file me: **`src/lib/login/studentLogin.ts`** + server logic **`src/lib/studentAuth.ts`**. Baad me OTP/Firebase/paid-check lagana ho to sirf wahi file badlein. |
-
-### 🔐 Naya Student Login (v4 — apna account, auto register)
-
-- **Koi bhi Email / Mobile Number / User ID + Password** chalega — Disha/Firebase ka account hona zaroori **nahi**.
-- **Pehli baar login = auto signup.** Naya ID aaya → account usi waqt ban jata hai aur seedha login ho jata hai. Koi alag registration form nahi.
-- Purana ID → password verify (galat par clean error).
-- Password **scrypt (N=16384)** hash + per-account salt ke saath DB `student_accounts` me save hota hai — **plaintext kabhi nahi**.
-- Login success par **HMAC-signed httpOnly cookie** (7 din) — localStorage me token nahi, JS se forge nahi ho sakti.
-- Brute force: per-IP **8 galat attempt = 10 min lock**.
-- Content APIs (`/api/batches`, `/api/video/*`, `/api/pdf/*`) session ke bina **401**.
-- Admin panel → naya **Accounts** tab: saare accounts (hash, count, last login, delete) — password kabhi client tak nahi jata. **Login History** tab sirf login events dikhata hai.
-- **Koi naya ENV var nahi chahiye** — session secret `ADMIN_SESSION_SECRET` se derive hota hai.
-
----
-
-## 🚀 Deploy — Sirf 3 Step
-
-### Step 1 — GitHub + Vercel
-1. Ye poora ZIP GitHub repo me upload karein (`.env`, `node_modules`, `.next` **upload na karein** — `.gitignore` me already hain).
-2. Vercel → *Add New Project* → repo select → Framework **Next.js** → **Deploy**.
-3. Vercel → *Settings → Environment Variables* me apne existing variables rakhein (`ADMIN_EMAIL`, `ADMIN_PASSWORD`, `FIREBASE_*` etc.). **Naya variable sirf 1 hai (optional):** `TELEGRAM_BOT_TOKEN` — aur wo `/admin` panel se bhi daala ja sakta hai, `.env` me zaroori nahi.
-
-### Step 2 — Telegram Bot (2 minute, 100% free, sabse zaroori)
-1. Telegram par **`@BotFather`** → `/newbot` → naam dein → **Bot Token** copy karein.
-2. Apne course channel/group me us bot ko **ADMIN** bana dein (private channel ke liye zaroori).
-3. `/admin` → **Telegram Sync Studio** → **Box 1** me:
-   - `API ID`, `API Hash` (my.telegram.org se)
-   - **Session String** (`python session.py` se banaya hua — sirf *sync/scan* ke liye)
-   - **Optional @BotFather Bot Token** ← isse streaming bot se hoti hai (`406 AUTH_KEY_DUPLICATED` kabhi nahi)
-   → **Verify & Save** dabayein (badge `BOT ACTIVE` dikh jayega).
-
-> **Kyun zaroori hai?** User `Session String` par Telegram ka rule hai: *ek session = ek IP*. Vercel par 10-20 containers alag-alag IP se chalte hain → purani string expire (`406`). Bot Token par ye rule **nahi** lagta — har container apni alag temporary key banata hai, isliye 300 users ek saath video dekh sakte hain.
-
-### Step 3 — Cloudflare Worker (free edge cache, smooth 4K-level delivery)
-1. `https://dash.cloudflare.com` → **Workers & Pages** → **Create** → **"Start with Hello World!"** (⚠️ *Upload files* button use **mat** karein — wo `.js` reject karta hai).
-2. Naam: `shd-stream` → **Deploy** → **Edit code** (`</>`) → sample code delete → **`cloudflare-worker/worker.js`** ka poora code paste → **Deploy**.
-3. Worker ke top par 2 lines apne hisab se:
-   ```js
-   const ORIGIN_SITE_URL = "https://studyhelperdoc.vercel.app";
-   const ALLOWED_ORIGIN_KEYWORD = "studyhelperdoc";
-   ```
-4. Jo URL mile (`https://shd-stream.<subdomain>.workers.dev`) use `/admin → Website Settings → Cloudflare Stream Worker URL` me paste karke **Save** karein.
-
-**Worker kaise kaam karta hai (v3):** 2MB aligned blocks → nearest Indian edge (Mumbai/Delhi/Chennai) par 7 din cache → har response max 16MB (Free plan safe) → **har block ki length + offset verify** (corrupt cache = 0%).
-
----
-
-## 🔐 Security (aapke rules 100% follow)
-
-- **Zero default/fallback admin credentials** — `ADMIN_EMAIL` + `ADMIN_PASSWORD_HASH` sirf `.env`/Firebase vault se.
-- Admin credentials, Telegram `Session String`, `API Hash`, `Bot Token` → **AES-256-GCM encrypted** Firebase me; client JS me kabhi nahi jate.
-- Students ko **source Telegram group/channel kabhi dikhta nahi**: saare links encrypted `token` (`/api/tg/stream/<token>`) me hote hain, captions se `Extracted By:` / `@username` / extractor tags **strip** ho jate hain.
-- Direct URL-bar hotlinking blocked (`Sec-Fetch-Dest` + Referer check, Worker par bhi).
-- Thumbnails na milne par clean **default placeholder image**.
-
----
-
-## 🧰 Admin Panel Quick Guide (`/admin`)
-
-| Tab | Kaam |
+| Rule | Kaise |
 | --- | --- |
-| **Telegram Sync Studio** | Box 1 = credentials vault (Session + Bot). Box 2 = group username/ID + **3 modes**: `➕ Add New Course`, `🔗 JSON Merge Only`, `⚡ Add + JSON Merge`. Neeche **Synced Groups list** (har sync save hoti hai) → `Re-Sync` / `Open Course` / `Delete Course` / `Remove Record`. |
-| **Courses Studio** | Course reorder `#1,#2,#3`, `⇈ Top ↑ Up ↓ Down ⇊ Bottom`, `⭐ Important` (top pin + website par star), JSON import, blank course create. |
-| **Explorer** | Folder/Video reorder + `⭐` star, YouTube embed add, PDF link add. |
-| **Website Settings** | App name/domain, default image, Cloudflare Worker URL, announcement, video-download allow/block. |
-| **Accounts** | Auto-register se bane student accounts — login ID, naam, kitni baar login, last login, delete. Password sirf scrypt hash ke roop me DB me. |
-| **Login History** | Har login ka record (Email/ID, IP, time). Password kabhi store nahi hota. |
+| **20 video / din / Telegram id** | `dailyLimit: 20` (bot + website dono jagah) |
+| **Limit reset raat 12 baje (IST)** | fixed day-window `00:00 Asia/Kolkata` — rolling 24h nahi |
+| **Website par sirf ek line** | `18 of 20 left today · resets 12:00 AM` — baaki messaging bot me English me |
+| **Public source → direct forward** | channel public + forwarding allowed → `forward_messages` (fast) |
+| **Private / no-forward → download+upload** | source ki pehchaan kabhi nahi dikhti |
+| **Caption order** | `Title → Topic → Course → Extracted By @krishna84` |
+| **Bot ki har baat English** | koi Hindi message nahi |
+| **File-backed courses protected** | `data/batches/*.json` kabhi edit/delete nahi — DB override only |
+| **Har failure dikhta hai** | koi chup-chaap hang nahi hota (bot + website dono me error surface) |
 
-**Max Messages** = 1500 default. Bade group (5000+ items) ke liye 3000-5000 karein.
+### 👤 Session vs 🤖 Bot — kaun kya karta hai
 
----
+Aapke **USER session** (`TG_SESSION_STRING`) aur **bot** (`TELEGRAM_BOT_TOKEN`) ka
+kaam alag hai. Bot ko private channel me admin ya member hone ki **zaroorat nahi**.
 
-## 📱 Student Side Features
-
-- **Watch page:** SmartVideoPlayer (Edge/Direct/Offline badge), `-10s/+10s`, speed `0.75x–2x`, `Turn Screen` (landscape rotate), `Save Offline`, resume-from-last, PDF notes button.
-- **PDF page:** progressive page-by-page viewer (top-first, scroll par neeche), zoom, page jump, fullscreen, `Save Offline`, `Browser View` fallback.
-- **`/downloads` dock:** VIDEO / PDF tabs, live progress, **Pause/Resume**, storage meter, `Play Offline` / `Read Offline`, optional `Export File`, delete.
-- Sab jagah **"Please wait, loading…"** indicators; folder/course data **on-demand page-wise** (low-RAM phone safe).
-- `TEST` / `LIVE` = Coming Soon (jaisa aapne kaha).
-
----
-
-## 🧪 Local Testing
-
-```bash
-npm install          # postinstall pdf.worker.min.js ko public/ me copy karta hai
-npm run dev          # http://localhost:3000  (preview port 3000)
-npm run build        # production build check
-npm run hash-admin   # ADMIN_PASSWORD ka bcrypt hash banane ke liye
-```
-
-`session.py` (project root ke bahar `/home/user/session.py` ya repo me) se **naya Session String** banayein:
-```bash
-python session.py     # IPv4 GramJS StringSession + Group IDs list karta hai
-```
-
----
-
-## 🩺 Troubleshooting
-
-| Symptom | Reason | Fix |
+| Source | Download kaun karta hai | Student ko kaun bhejta hai |
 | --- | --- | --- |
-| `406 AUTH_KEY_DUPLICATED` | Purani session string 2 IP par ek saath khul gayi thi → Telegram ne **us string ko** expire kiya (aapka account 100% safe) | `python session.py` se **nayi string** + **Bot Token** Box 1 me save karein |
-| Video atakta/black | Cloudflare Worker URL set nahi ya worker purana (v2) hai | **v3 `worker.js`** dubara paste karein; ya `/admin → Website Settings` me Worker URL **khali** kar dein (direct Vercel chalega) |
-| Video "jhal-jhal" sirf ek hi lecture me, Telegram app me sahi | Wo `.mp4` extractor se **broken frame-order (B-frame/CTTS)** ke saath bani hai | Us file ko re-mux/re-encode karke Telegram par dubara upload karein: `ffmpeg -i in.mp4 -c:v libx264 -preset veryfast -crf 23 -c:a aac -movflags +faststart out.mp4` (website side har possible fix already laga hai) |
-| PDF khulta nahi | External PDF par CORS block | PDF page par **Browser View** toggle karein, ya PDF ko Telegram par upload karke sync karein |
-| Sync ke baad list nahi dikhti | Purana build | Naya code deploy karein — ab record **har haal me** save hota hai (status `SAVED` / `PARTIAL` / `ERROR` + reason) |
-| Download paused | Browser band ho gaya tha | `/downloads` → **Resume** (wahin se continue hota hai) |
+| **Private channel/group** | 🧑 aapka **USER session** (woh member hai) | 🤖 **bot** (fresh upload, source kabhi nahi dikhta) |
+| **Public + forwarding allowed** | — (download hi nahi hota) | 🤖 **bot** seedha **forward** karta hai |
+| **Public par `noforwards`** | 🧑 USER session | 🤖 bot (fresh upload) |
+| **Caption me doosron ka `@handle`** | 🧑 USER session | 🤖 bot (fresh upload, handle leak nahi hota) |
+
+- Video **hamesha bot ke chat me hi** aati hai — forward bhi `self.bot` se hota hai,
+  isliye aapka personal account student ke saamne nahi aata aur 2-ghante wali
+  auto-delete sahi message par lagti hai.
+- **Public channel me forward fast path** chahiye to us channel/group me bot ko
+  **member add** kar dijiye (admin zaroori nahi). Bot access nahi kar paaya to koi
+  error nahi aayega — bot chup-chaap **session-download + fresh upload** par
+  fallback kar dega (event log: `forward_fallback`).
+- Bot ko **admin** sirf tab chahiye jab **join-gate** ON ho (membership check ke liye).
+
+### Matching (bot)
+Sirf wahi compare hota hai jo caption me **actually likha** hai:
+
+- title / topic / course — teeno ka weighted score (threshold 60)
+- **folder skip** ho jaye (topic caption me na ho) → topic ka weight title me chala jaata hai
+- **course naam alag jagah** ho → topic-path, caption-topic aur title me bhi dhoondha jaata hai
+  (jaise topic `Crash Course 2026` course `All Study Material` ke andar — same course)
+- `All Study Material`, `PDF`, `Notes` jaise **generic folder** naam par reject nahi hota
+- `12th मंजिल बैच` vs `11th परिवर्तन बैच` → **hard reject** (galat batch ki video nahi jayegi)
+- Part guard: Part 1 kabhi Part 2 se match nahi karta
+- Same naam kai groups me → **sabse zyada score wala group** jeet-ta hai
 
 ---
 
-## 📂 Important Files
+## 3 · Local run
 
-```
-src/lib/tgClient.ts                 Telegram MTProto: bot-first streaming, byte-exact blocks, ephemeral admin scan
-src/lib/tgParser.ts                 Caption parsing (Index/Title/Topic/Batch/Link), YouTube auto-detect, course tree builder, JSON deep-merge
-src/lib/clientDownloads.ts          In-App Offline Vault (IndexedDB chunks, resumable, low-RAM)
-src/lib/login/studentLogin.ts       👈 STUDENT LOGIN — future changes sirf yahan
-src/lib/login/adminLogin.ts         👈 ADMIN LOGIN client helpers
-src/lib/adminAuth.ts                Admin hash verify + cookie guard (server)
-src/components/SmartVideoPlayer.tsx Gap-jump + stall-recovery + offline-first player
-src/components/ProgressivePdfViewer.tsx  pdf.js progressive page-by-page viewer
-src/app/api/tg/stream/[token]/route.ts   Continuous HTTP 206 stream (32MB cap)
-cloudflare-worker/worker.js         Edge Streamer v3 (byte-exact, 16MB cap)
-session.py                          Naya GramJS StringSession generator
+```bash
+# website
+npm install
+cp .env.example .env.local      # secrets bhariye
+npm start                       # http://localhost:3000
+
+# bot (self-test — Telegram/Firebase ke bina offline logic check)
+python3 -m venv .venv-bot && .venv-bot/bin/pip install -r bot/requirements.txt
+.venv-bot/bin/python bot/bot.py --selftest
+
+# bot login (USER session string banane ke liye, ek baar)
+.venv-bot/bin/python bot/bot.py --login
 ```
 
-## 🔥 Firebase RTDB Rules (`database.rules.json`)
-```json
-{ "rules": { ".read": false, ".write": false } }
+Firebase creds na hon to server **local JSON store** (`/tmp/shd_local_store.json`)
+par chalta hai — testing ke liye theek, production ke liye nahi.
+
+---
+
+## 4 · Deploy (Render, free)
+
+`render.yaml` blueprint hai — repo connect karte hi dono services ban jaati hain.
+
+**Site** (`studyhelper-site`)
+- Build `npm ci --omit=dev` · Start `node server.js` · Health `/api/health`
+- `PORT` Render deta hai (manual set na karein), `HOST=0.0.0.0`
+
+**Bot** (`studyhelper-bot`)
+- Build `pip install -r bot/requirements.txt` · Start `python bot/bot.py` · Health `/healthz`
+- **numInstances: 1** (ek session do process par chale to `AUTH_KEY_DUPLICATED`)
+- Free web service ~15 min idle par so jaati hai → koi external pinger
+  (UptimeRobot / cron-job) `/healthz` har 10 min hit kare
+
+**Zaroori env (dono me):**
+`ADMIN_SESSION_SECRET` **bilkul same** — warna website ke banaye encrypted token
+bot decrypt nahi kar payega.
+
+Bot: `TELEGRAM_API_ID`, `TELEGRAM_API_HASH`, `TELEGRAM_BOT_TOKEN`, `TG_SESSION_STRING`
+(**USER session — private channels se download isi se hota hai**), `FIREBASE_*`, `OWNER_TG_ID`.
+Site: `FIREBASE_*`, `ADMIN_EMAIL`, `ADMIN_PASSWORD`, `TELEGRAM_BOT_USERNAME`.
+
+> ⚠️ Website ko ab `TELEGRAM_API_ID/API_HASH/SESSION_STRING` ki zaroorat **nahi** —
+> scanning aur delivery sirf bot karta hai.
+
+---
+
+## 5 · Admin panel (8 tabs)
+
+| Tab | Kya karta hai |
+| --- | --- |
+| **Overview** | courses, videos, requests (aaj ke), students, bot heartbeat |
+| **Courses** | naya DB-only course, edit (name/thumb/price/hidden), hide/delete |
+| **Explorer** | course ka tree → har lecture par **Add by URL** (Telegram post link) |
+| **Telegram** | group scan task, registered groups, delivery requests, **purge danger-zone** |
+| **Bot** | daily limit, IST reset hour, auto-delete, delivery mode, join-gate, pause, users |
+| **Settings** | app name, telegram URLs, credit/contact, limits, maintenance mode |
+| **Accounts** | student create/disable/delete + password reset |
+| **Logins** | login + activity logs, filter ke saath |
+
+**Add by URL** — Telegram post link paste kijiye (`https://t.me/channel/1234` ya
+`https://t.me/c/1234567890/1234`):
+1. link validate hota hai (public/private pehchaan ke saath)
+2. chatId + messageId **encrypt** hoke node par attach (`tg_video_token`)
+3. delivery automatically decide hoti hai — public → forward, private → download+upload
+
+**Purge (danger zone)** — sirf Telegram-sourced additions:
+`stripLinks` (default), `deleteTelegramNodes`, `deleteTelegramCourses`,
+`clearGroupRegistry`, `clearRequests`, `clearEmbeds`, `clearBotState`.
+File-backed courses, YouTube links, bot config, student accounts aur site settings
+**kabhi** delete nahi hote. Preview button se pehle dekh sakte hain; chalane ke liye
+`PURGE` type karna zaroori hai.
+
+---
+
+## 6 · Anti-theft gate (`POST /api/tg/request`)
+
+1. login (401 `LOGIN_REQUIRED`)
+2. per-user rate limit — 15 / 10 min (429 `RATE_LIMITED`)
+3. **reuse** — isi lecture ki request pehle se active hai to wahi deep link
+   (naya record nahi banta, isliye yeh cap-checks se pehle hai)
+4. per-IP rate limit — 30 / 10 min (429 `IP_RATE_LIMITED`)
+5. global daily breaker — `globalDailyLimit` 500 (503 `GLOBAL_LIMIT`)
+6. **daily limit 20 / user** — IST midnight reset (429 `DAILY_LIMIT`)
+7. pending cap — `maxPendingPerUser` 3 (429 `TOO_MANY_PENDING`)
+8. node par encrypted `tg_video_token` na ho → 409 `NO_SOURCE` / `YOUTUBE_ONLY`
+   ("not available on Telegram yet, will be uploaded soon")
+
+Request record me plaintext chatId/messageId jaata hai (bot ke liye), website par
+kabhi nahi dikhta. Bot side par: request **pehli baar kholne wale Telegram id se
+bind** ho jaati hai (`boundTgUid`), `requestReuseLimit` (default 1) ke baad mar
+jaati hai, aur TTL 168 ghante.
+
+---
+
+## 7 · Self-test (dono taraf)
+
+```bash
+# server: crypto, post-link parsing, IST quota window, overlay merge, sessions
+node server.js --selftest        # 51 checks
+
+# bot: vault, quota, delivery-mode, matcher rules, join-gate, health server
+.venv-bot/bin/python bot/bot.py --selftest   # 91 checks
 ```
-(Sirf server-side Service Account access — public read/write band.)
+
+Dono self-test **bina Telegram/Firebase credentials ke** chalte hain — pure offline
+logic. CI ya deploy se pehle chala lijiye:
+
+```bash
+node server.js --selftest && .venv-bot/bin/python bot/bot.py --selftest
+```
+
+> 🔐 Website aur bot ka crypto contract byte-compatible hai (`v1.` vault cipher aur
+> `tg_` media token). Isliye `ADMIN_SESSION_SECRET` dono service me **bilkul same**
+> hona chahiye — warna bot website ke banaye token decrypt nahi kar payega.
