@@ -64,6 +64,27 @@ nahi**. Purana streaming system poora hata diya gaya hai.
 | **File-backed courses protected** | `data/batches/*.json` kabhi edit/delete nahi — DB override only |
 | **Har failure dikhta hai** | koi chup-chaap hang nahi hota (bot + website dono me error surface) |
 
+### 👤 Session vs 🤖 Bot — kaun kya karta hai
+
+Aapke **USER session** (`TG_SESSION_STRING`) aur **bot** (`TELEGRAM_BOT_TOKEN`) ka
+kaam alag hai. Bot ko private channel me admin ya member hone ki **zaroorat nahi**.
+
+| Source | Download kaun karta hai | Student ko kaun bhejta hai |
+| --- | --- | --- |
+| **Private channel/group** | 🧑 aapka **USER session** (woh member hai) | 🤖 **bot** (fresh upload, source kabhi nahi dikhta) |
+| **Public + forwarding allowed** | — (download hi nahi hota) | 🤖 **bot** seedha **forward** karta hai |
+| **Public par `noforwards`** | 🧑 USER session | 🤖 bot (fresh upload) |
+| **Caption me doosron ka `@handle`** | 🧑 USER session | 🤖 bot (fresh upload, handle leak nahi hota) |
+
+- Video **hamesha bot ke chat me hi** aati hai — forward bhi `self.bot` se hota hai,
+  isliye aapka personal account student ke saamne nahi aata aur 2-ghante wali
+  auto-delete sahi message par lagti hai.
+- **Public channel me forward fast path** chahiye to us channel/group me bot ko
+  **member add** kar dijiye (admin zaroori nahi). Bot access nahi kar paaya to koi
+  error nahi aayega — bot chup-chaap **session-download + fresh upload** par
+  fallback kar dega (event log: `forward_fallback`).
+- Bot ko **admin** sirf tab chahiye jab **join-gate** ON ho (membership check ke liye).
+
 ### Matching (bot)
 Sirf wahi compare hota hai jo caption me **actually likha** hai:
 
@@ -117,8 +138,8 @@ par chalta hai — testing ke liye theek, production ke liye nahi.
 `ADMIN_SESSION_SECRET` **bilkul same** — warna website ke banaye encrypted token
 bot decrypt nahi kar payega.
 
-Bot: `TELEGRAM_API_ID`, `TELEGRAM_API_HASH`, `TELEGRAM_BOT_TOKEN`, `TG_SESSION_STRING`,
-`FIREBASE_*`, `OWNER_TG_ID`.
+Bot: `TELEGRAM_API_ID`, `TELEGRAM_API_HASH`, `TELEGRAM_BOT_TOKEN`, `TG_SESSION_STRING`
+(**USER session — private channels se download isi se hota hai**), `FIREBASE_*`, `OWNER_TG_ID`.
 Site: `FIREBASE_*`, `ADMIN_EMAIL`, `ADMIN_PASSWORD`, `TELEGRAM_BOT_USERNAME`.
 
 > ⚠️ Website ko ab `TELEGRAM_API_ID/API_HASH/SESSION_STRING` ki zaroorat **nahi** —

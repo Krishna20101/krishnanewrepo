@@ -2934,14 +2934,45 @@ class DeliveryBot:
         tmp_path: Optional[str] = None
         try:
             if mode == "forward":
+                # ── FORWARD MODE: BOT forward karta hai (video BOT chat me hi aani
+                #    chahiye). User session se forward karne par video student ko
+                #    aapke PERSONAL account ke alag DM me chali jaati, aur auto-delete
+                #    (jo bot karta hai) galat chat par lagti. Isliye: bot pehle.
+                #    Bot ko source channel/group tak access nahi (member nahi hai) →
+                #    error pakad kar automatic CLEAN MODE par fallback.
                 await self.bot.edit_message(
                     uid, status.id, "📤 Sending your lecture… (forward mode)"
                 )
-                sent_message = await self.user.forward_messages(uid, message)
-                if isinstance(sent_message, list):
-                    sent_message = sent_message[0] if sent_message else None
-            else:
-                # ── CLEAN MODE: download (user session) → upload (bot) ────────
+                try:
+                    sent_message = await self.bot.forward_messages(uid, message)
+                    if isinstance(sent_message, list):
+                        sent_message = sent_message[0] if sent_message else None
+                    if sent_message is None:
+                        raise RuntimeError("forward returned no message")
+                except Exception as exc:  # noqa: BLE001
+                    log(
+                        "bot forward failed (%s) → falling back to download+upload"
+                        % short_error(exc)
+                    )
+                    self.store.log_event(
+                        "forward_fallback",
+                        uid=uid,
+                        requestId=request_id,
+                        error=short_error(exc),
+                    )
+                    await self.bot.edit_message(
+                        uid,
+                        status.id,
+                        "📥 Direct forward possible nahi — downloading instead…",
+                    )
+                    mode = "clean"
+                    sent_message = None
+
+            if mode == "clean":
+                # ── CLEAN MODE: download (USER session) → upload (BOT) ─────────
+                #    USER session private channel ka MEMBER hota hai, isliye wahi
+                #    download karta hai. Bot ko us channel me admin/member hone ki
+                #    zaroorat NAHI — bot sirf student ko file bhejta hai.
                 file_name = safe_display_name(
                     candidate.get("file_name") or matched.get("title") or title
                 )
@@ -3985,6 +4016,27 @@ def cmd_selftest() -> int:
           delivery_mode_for({"deliveryMode": "forward"}, restricted) == "clean")
     check("default deliveryMode = auto", DEFAULT_CONFIG.get("deliveryMode") == "auto",
           DEFAULT_CONFIG.get("deliveryMode"))
+
+    # 🔎 code-shape guard: forward hamesha BOT kare (user session se nahi), aur
+    #    fallback maujood rahe. Warna video student ko personal account ke DM me
+    #    chali jaati aur auto-delete galat chat par lagti.
+    try:
+        with open(os.path.abspath(__file__), "r", encoding="utf-8") as fh:
+            source_text = fh.read()
+    except OSError:
+        source_text = ""
+    if source_text:
+        check("forward uses BOT client (self.bot.forward_messages)",
+              "await self.bot.forward_messages(uid, message)" in source_text)
+        # (string ko jod kar likha hai — warna yeh check khud ko hi match kar leta)
+        check("forward never uses the USER session directly",
+              ("self.user." + "forward_messages") not in source_text)
+        check("forward failure falls back to clean mode",
+              "forward_fallback" in source_text)
+        check("clean mode downloads via USER session",
+              "await self.user.download_media(" in source_text)
+        check("clean mode uploads via BOT",
+              "await self.bot.send_file(" in source_text)
 
     print("\n── 🕛 daily limit reset (IST midnight) ─────────────────────────")
     check("reset label 0h = 12:00 AM", reset_time_label({"dailyResetHourIST": 0}) == "12:00 AM")
