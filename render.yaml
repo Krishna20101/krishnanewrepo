@@ -45,8 +45,9 @@ services:
         sync: false
       - key: TELEGRAM_BOT_USERNAME
         sync: false
+      # 0 = attached links kabhi expire nahi hote (bot ka auto-scan bhi yahi use karta hai)
       - key: TG_MEDIA_TOKEN_TTL_DAYS
-        value: "30"
+        value: "0"
       - key: CORS_ALLOWED_ORIGINS
         sync: false
 
@@ -97,3 +98,15 @@ services:
         value: /tmp/shd_bot_state.db
       - key: BOT_HEALTH_TOKEN
         sync: false
+      # 🔗 attached links kabhi expire na hon (website wali same policy)
+      - key: TG_MEDIA_TOKEN_TTL_DAYS
+        value: "0"
+      # 🧲 AUTO-SCAN: kaun se channels padhne hain (10-15 ids, comma separated)
+      #    @handle ya -100xxxxxxxxxx ya https://t.me/+invite
+      #    Yahi list delivery-search ko bhi limit karti hai (baaki dialogs ignore).
+      - key: BOT_SCAN_CHATS
+        sync: false
+      - key: BOT_SCAN_MIN_SCORE
+        value: "75"
+      - key: BOT_SCAN_MESSAGE_LIMIT
+        value: "400"

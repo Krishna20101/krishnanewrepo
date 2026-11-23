@@ -399,11 +399,11 @@
     const data = await api("/api/admin/bot");
     clear(panel);
 
-    // scan task
-    const invite = h("input", { type: "text", placeholder: "https://t.me/+AbCdEfGhIjKl (invite link)" });
-    const chatId = h("input", { type: "text", placeholder: "ya channel id: @name / -100xxxxxxxxxx" });
-    const batchId = h("input", { type: "text", placeholder: "kis course me daalna hai (batch id, optional)" });
-    const scanBtn = h("button", { class: "btn btn-primary", type: "button" }, "Queue scan");
+    // 🧲 auto-scan task (channel padho → course lectures par links attach karo)
+    const invite = h("input", { type: "text", placeholder: "optional · https://t.me/+AbCdEfGhIjKl" });
+    const chatId = h("input", { type: "text", placeholder: "optional · @name / -100xxxxxxxxxx" });
+    const batchId = h("input", { type: "text", placeholder: "optional · sirf ek course (batch id)" });
+    const scanBtn = h("button", { class: "btn btn-primary", type: "button" }, "🧲 Start auto-scan");
     scanBtn.addEventListener("click", async () => {
       scanBtn.disabled = true;
       try {
@@ -418,18 +418,46 @@
         scanBtn.disabled = false;
       }
     });
-    panel.appendChild(card("Group / channel scan",
+    const scanInfo = data.scan
+      ? `Last scan: ${data.scan.attached} link attached · ${data.scan.matched} matched · ${data.scan.unmatched} abhi bina link · threshold ${data.scan.minScore}/100 · ${data.scan.durationSec}s · ${ago(data.scan.lastAt)}${data.scan.errors ? ` · ⚠️ ${data.scan.errors} error` : ""}`
+      : "Abhi tak koi auto-scan nahi chala.";
+    panel.appendChild(card("Auto-scan (channel → course links)",
       h("div", { class: "row" }, field("Invite link", invite), field("Channel id", chatId), field("Course id", batchId)),
       h("div", { style: "margin-top:10px" }, scanBtn),
       h("p", { class: "tiny", style: "margin:10px 0 0" },
-        "Scan bot karta hai (website GramJS use nahi karti). Bot online hone par task uthayega aur courses me videos/PDF add kar dega.")));
+        "Teeno field khaali chhodiye → bot env wali list (BOT_SCAN_CHATS) ke saare channels ek saath padh lega. "
+        + "Har video/PDF ka caption course JSON ke title + folder + course naam se match hota hai; jo threshold se upar jeeta, "
+        + "uska Telegram link usi lecture par khud attach ho jata hai (admin 'Add by URL' jaisa hi). "
+        + "Uske baad student ke ▶ dabane par search nahi hota — bot seedha wahi message uthata hai. "
+        + "Naya lecture node kabhi nahi banta aur data/batches/*.json file kabhi nahi badalti (sirf DB overlay)."),
+      h("p", { class: "tiny", style: "margin:8px 0 0" }, scanInfo)));
 
-    // groups registry
-    panel.appendChild(card(`Registered groups (${(data.groups || []).length})`,
+    // groups registry (bot isi me scan report likhta hai)
+    panel.appendChild(card(`Scanned channels (${(data.groups || []).length})`,
       (data.groups || []).length
-        ? table(["Title", "Chat id", "Items", "Last scan"],
-          data.groups.map((g) => [g.title || g.key, h("span", { class: "mono" }, g.chatId || "—"), String(g.items || 0), g.lastScanAt ? ago(g.lastScanAt) : "—"]))
-        : h("div", { class: "empty" }, "Koi group register nahi hai.")));
+        ? table(["Title", "Chat id", "Media", "Attached", "Bina link", "Last scan"],
+          data.groups.map((g) => [
+            g.lastError ? `${g.title || g.key} ⚠️` : (g.title || g.key),
+            h("span", { class: "mono" }, g.chatId || "—"),
+            String(g.items || 0),
+            h("span", { class: "chip ok" }, String(g.attached || 0)),
+            String(g.unmatched || 0),
+            g.lastScanAt ? ago(g.lastScanAt) : "—",
+          ]))
+        : h("div", { class: "empty" }, "Abhi koi channel scan nahi hua.")));
+
+    // scan tasks (status/result bot bharta hai)
+    panel.appendChild(card(`Scan tasks (${(data.tasks || []).length})`,
+      (data.tasks || []).length
+        ? table(["Task", "Target", "Status", "Result", "Created"],
+          data.tasks.map((t) => [
+            t.type || "scan_group",
+            h("span", { class: "mono" }, t.target || "env list"),
+            h("span", { class: "chip " + (t.status === "done" ? "ok" : t.status === "error" ? "bad" : "warn") }, t.status || "queued"),
+            t.result || "—",
+            ago(t.createdAt),
+          ]))
+        : h("div", { class: "empty" }, "Koi task queue nahi hua.")));
 
     // requests
     panel.appendChild(card(`Delivery requests (${(data.requests || []).length})`,
