@@ -149,7 +149,27 @@ Bot: `TELEGRAM_API_ID`, `TELEGRAM_API_HASH`, `TELEGRAM_BOT_TOKEN`, `TG_SESSION_S
 Site: `FIREBASE_*`, `ADMIN_EMAIL`, `ADMIN_PASSWORD`, `TELEGRAM_BOT_USERNAME`.
 
 > ⚠️ Website ko ab `TELEGRAM_API_ID/API_HASH/SESSION_STRING` ki zaroorat **nahi** —
-> scanning aur delivery sirf bot karta hai.
+> scanning aur delivery sirf bot karta hai. **Vercel me session kabhi mat daliye.**
+
+**🔑 Bot credentials kis order me uthte hain** (`resolve_credentials`):
+
+1. **env vars** — `TG_SESSION_STRING`, `TELEGRAM_API_ID`, `TELEGRAM_API_HASH`, `TELEGRAM_BOT_TOKEN`
+2. **Firebase vault** — `telegram_vault/encrypted_creds` (encrypted; `ADMIN_SESSION_SECRET`
+   se khulta hai). Purane website-panel se save kiye apiId/apiHash/botToken/sessionString
+   yahin pade hain → Render me Telegram secrets na bhi do to bot vault se utha lega.
+3. **interactive** — kuch missing ho to bot saaf likh deta hai kya chahiye.
+
+Startup par log me dikhta hai kaunsa source use hua:
+`user session : env:TG_SESSION_STRING` ya `vault (telethon format)` ya
+`vault (converted from GramJS)`.
+
+> ⚠️ Purani vault wali session **GramJS** format me hai — bot use Telethon me convert
+> karta hai (best-effort). Sabse saaf rasta: ek baar `python bot/bot.py --login`
+> chala kar **nayi Telethon session** banaiye aur wahi `TG_SESSION_STRING` me daliye.
+>
+> ⚠️ **EK session = EK process.** Jo bhi session chale, wo sirf Render ke ek instance
+> me chale (numInstances: 1) aur koi purana runner/band deployment use use na kar
+> raha ho — warna Telegram `406 AUTH_KEY_DUPLICATED` de kar session terminate kar deta hai.
 
 ### 4b · Vercel (agar purana domain wahin hai)
 
