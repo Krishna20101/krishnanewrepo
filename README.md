@@ -351,7 +351,7 @@ node server.js --selftest        # 53 checks
 
 # bot: vault, media-token, quota, delivery-mode, matcher rules, 🧲 auto-scan
 #      (course loader + overlay + poora pipeline nakli channel ke saath), join-gate, health
-.venv-bot/bin/python bot/bot.py --selftest   # 192 checks
+.venv-bot/bin/python bot/bot.py --selftest   # 198 checks
 ```
 
 Dono self-test **bina Telegram/Firebase credentials ke** chalte hain — pure offline

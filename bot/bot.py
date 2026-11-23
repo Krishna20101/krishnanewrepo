@@ -319,30 +319,59 @@ def gramjs_to_telethon(session_string: str) -> Optional[str]:
     addr = parsed["serverAddress"]
     if ":" in addr and dc_id in TELEGRAM_DC_IPV4:
         addr = TELEGRAM_DC_IPV4[dc_id]  # IPv6 → IPv4 (server-friendly)
+    auth_key = parsed["authKey"]
+    if len(auth_key) != 256:
+        return None
     try:
+        # Telethon StringSession wire format: '1' + urlsafe_b64(dcId|ip|port|key)
         payload = (
-            bytes([1])
-            + bytes([dc_id])
+            bytes([dc_id])
             + _ip_to_bytes(addr)
             + struct.pack(">H", parsed["port"] or 443)
-            + parsed["authKey"]
+            + auth_key
         )
-        return base64.b64encode(payload).decode("ascii")
+        return "1" + base64.urlsafe_b64encode(payload).decode("ascii")
     except Exception:
         return None
 
 
 def looks_like_telethon_session(session_string: str) -> bool:
     raw = (session_string or "").strip()
-    if not raw:
+    if not raw or raw[0] != "1":
         return False
-    body = raw[1:] if raw.startswith("1") else raw
+    body = raw[1:]
     try:
-        buf = base64.b64decode(body + "=" * (-len(body) % 4))
+        # Telethon urlsafe alphabet use karta hai; urlsafe_b64decode standard
+        # ('+' '/') strings ko bhi accept kar leta hai
+        buf = base64.urlsafe_b64decode(body + "=" * (-len(body) % 4))
     except (binascii.Error, ValueError):
         return False
-    # Telethon layout: version(1) + dcId(1) + ip(4|16) + port(2) + authKey(256)
-    return len(buf) in (264, 276) and buf[0] == 1
+    # Telethon StringSession: dcId(1) + ip(4|16) + port(2) + authKey(256)
+    if len(buf) == 263:  # IPv4
+        return 1 <= buf[0] <= 5
+    if len(buf) == 275:  # IPv6 Telethon — ya GramJS (addr string form), dono 275
+        addr_len = struct.unpack(">h", buf[1:3])[0]
+        if 1 <= addr_len <= 64 and 5 + addr_len + 256 == len(buf):
+            addr = buf[3 : 3 + addr_len]
+            if all(0x20 <= b < 0x7F for b in addr):
+                return False  # printable addr string → ye GramJS layout hai
+        return 1 <= buf[0] <= 5
+    return False
+
+
+def export_session_string(session: Any) -> str:
+    """Kisi bhi Telethon session (file ya memory) se StringSession export karo.
+
+    MemorySession/FileSession ka apna .save() string NAHI deta (None/'' lautata
+    hai), isliye dc + auth_key copy karke StringSession.save() chalaya jata hai.
+    Connect hone ki zaroorat nahi — session file padh kar bhi kaam karta hai.
+    """
+    from telethon.sessions import StringSession
+
+    out = StringSession()
+    out.set_dc(session.dc_id, session.server_address, session.port)
+    out.auth_key = session.auth_key
+    return out.save() or ""
 
 
 # ─────────────────────────────────────────────────────────────────────────────
@@ -871,6 +900,32 @@ class SqliteStore(Store):
 # ─────────────────────────────────────────────────────────────────────────────
 # FIREBASE RTDB BACKEND (website ke saath shared)
 # ─────────────────────────────────────────────────────────────────────────────
+def _firebase_cert_info(service_account: Dict[str, str]) -> Dict[str, str]:
+    """Python firebase-admin ko poora service-account shape chahiye.
+
+    Node wali `admin.credential.cert({projectId, clientEmail, privateKey})`
+    shortcut yahan kaam nahi karti — google-auth `token_uri` (aur baaki URL
+    fields) ko required maanta hai, warna "missing fields token_uri" error
+    aata hai aur bot SQLite fallback me chala jata hai (website se sync toot
+    jaati hai). Isliye defaults ke saath poora dict banaya jata hai.
+    """
+    return {
+        "type": "service_account",
+        "project_id": service_account["project_id"],
+        "client_email": service_account["client_email"],
+        "private_key": service_account["private_key"],
+        "private_key_id": service_account.get("private_key_id") or "",
+        "client_id": service_account.get("client_id") or "",
+        "auth_uri": service_account.get("auth_uri")
+        or "https://accounts.google.com/o/oauth2/auth",
+        "token_uri": service_account.get("token_uri")
+        or "https://oauth2.googleapis.com/token",
+        "auth_provider_x509_cert_url": service_account.get("auth_provider_x509_cert_url")
+        or "https://www.googleapis.com/oauth2/v1/certs",
+        "client_x509_cert_url": service_account.get("client_x509_cert_url") or "",
+    }
+
+
 class FirebaseStore(Store):
     backend = "firebase"
 
@@ -878,14 +933,7 @@ class FirebaseStore(Store):
         import firebase_admin  # noqa: F401  (optional dependency)
         from firebase_admin import credentials, db
 
-        cred = credentials.Certificate(
-            {
-                "type": "service_account",
-                "project_id": service_account["project_id"],
-                "client_email": service_account["client_email"],
-                "private_key": service_account["private_key"],
-            }
-        )
+        cred = credentials.Certificate(_firebase_cert_info(service_account))
         self._app = firebase_admin.initialize_app(
             cred, {"databaseURL": database_url, "httpTimeout": 20}
         )
@@ -4764,7 +4812,7 @@ def cmd_login() -> int:
                         break
 
             me = await client.get_me()
-            session_string = client.session.save()
+            session_string = export_session_string(client.session)
             auth_key = client.session.auth_key
             print("\n" + "=" * 70)
             print("✅ LOGIN SUCCESSFUL — %s (id=%s)" % (me.first_name, me.id))
@@ -4826,7 +4874,7 @@ def cmd_print_session() -> int:
         print("❌ %s.session nahi mila. Pehle: python3 bot.py --login" % path)
         return 1
     client = TelegramClient(path, api_id, api_hash)
-    session_string = client.session.save()
+    session_string = export_session_string(client.session)
     if not session_string:
         print("❌ Session file khali hai. Dobara: python3 bot.py --login")
         return 1
@@ -4849,7 +4897,7 @@ def cmd_info() -> int:
     print(" bot token       : %s" % ("set" if creds["botToken"] else "❌ missing"))
     print(" user session    : %s" % (creds["sessionSource"] or "❌ missing (run: python3 bot.py --login)"))
     print(" credentials     : %s" % message)
-    print(" vault decrypt   : %s" % ("ok" if __import__("vault").vault_key() else "unavailable (ADMIN_SESSION_SECRET missing)"))
+    print(" vault decrypt   : %s" % ("ok" if vault_key() else "unavailable (ADMIN_SESSION_SECRET missing)"))
     print("-" * 70)
     for key in ("dailyLimit", "autoDeleteHours", "deliveryMode", "creditUsername", "botUsername", "adminTgIds"):
         print(" %-15s : %s" % (key, cfg.get(key)))
@@ -4965,10 +5013,46 @@ def cmd_selftest() -> int:
     parsed = parse_gramjs_session(gramjs)
     check("gramjs parse", parsed is not None and parsed["dcId"] == 2 and parsed["port"] == 443)
     telethon_str = gramjs_to_telethon(gramjs)
-    check("gramjs→telethon", bool(telethon_str) and len(base64.b64decode(telethon_str + "==")) == 264,
-          len(base64.b64decode(telethon_str + "==")) if telethon_str else 0)
+    check("gramjs→telethon wire format", bool(telethon_str) and telethon_str.startswith("1") and len(telethon_str) == 353,
+          len(telethon_str or ""))
     check("telethon detect", looks_like_telethon_session(telethon_str or ""))
     check("gramjs not misdetected", not looks_like_telethon_session(gramjs))
+
+    # Session string export: MemorySession/FileSession .save() None deta hai,
+    # isliye export_session_string() helper hai — yahi --login/--print-session use karte hain
+    try:
+        from telethon.crypto import AuthKey as _AuthKey
+        from telethon.sessions import SQLiteSession as _SQLiteSession
+        from telethon.sessions import StringSession as _StringSession
+
+        _tg_avail = True
+    except ImportError:  # telethon install nahi → ye checks skip
+        _tg_avail = False
+    if _tg_avail:
+        import tempfile
+
+        with tempfile.TemporaryDirectory() as _sess_tmp:
+            _spath = os.path.join(_sess_tmp, "shd_sess")
+            _wsess = _SQLiteSession(_spath)
+            _wsess.set_dc(2, "149.154.167.51", 443)
+            _wsess.auth_key = _AuthKey(bytes(range(256)))
+            _wsess.save()
+            _rsess = _SQLiteSession(_spath)  # naya process jaisa fresh read
+            check("raw FileSession.save() is None (helper zaroori)", _rsess.save() is None)
+            _exported = export_session_string(_rsess)
+            check("session export 353 chars", len(_exported) == 353, len(_exported))
+            check("session export telethon-format", looks_like_telethon_session(_exported))
+            _loaded = _StringSession(_exported)
+            check("session export StringSession load", _loaded.dc_id == 2 and _loaded.port == 443)
+        if telethon_str:
+            _conv = _StringSession(telethon_str)
+            check("gramjs→telethon StringSession load",
+                  _conv.dc_id == 2 and _conv.port == 443 and _conv.auth_key.key == auth_key)
+    check(
+        "firebase cert info has token_uri",
+        _firebase_cert_info({"project_id": "p", "client_email": "e", "private_key": "k"})["token_uri"]
+        == "https://oauth2.googleapis.com/token",
+    )
 
     print("\n── 🧲 auto-scan (channel → course attach) ──────────────────────")
     _scan_env_backup = {
