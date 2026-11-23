@@ -153,6 +153,115 @@ def encrypt_vault_json(payload: Any) -> str:
 
 
 # ─────────────────────────────────────────────────────────────────────────────
+# 🎬 MEDIA TOKEN — server.js:makeMediaToken / readMediaToken ka exact mirror.
+#    Auto-scan me bot khud course-tree par token likhta hai, isliye yeh Python
+#    me bhi chahiye. Format:  tg_<iv 16 chars>_<tag 22 chars>_<ct>
+#    IV deterministic: sha256(masterSecret|chatId|msgId|kind|window)[:12]
+#    (same chat+msg+kind+window → same token, isliye dobara scan par node ka
+#     link "badalta" nahi — students ke purane deep links bhi zinda rehte hain.)
+# ─────────────────────────────────────────────────────────────────────────────
+def token_ttl_days() -> int:
+    """TG_MEDIA_TOKEN_TTL_DAYS — default 0 = kabhi expire nahi (website jaisa hi).
+
+    Attach hua link ek FIXED Telegram message ko point karta hai; 30 din baad
+    expire hone par students ko "link is not valid any more" dikhta, isliye
+    default never-expire hai. Rotation chahiye to env me 30 set kar dijiye.
+    """
+    raw = env("TG_MEDIA_TOKEN_TTL_DAYS")
+    if not raw:
+        return 0
+    try:
+        return int(float(raw))
+    except (TypeError, ValueError):
+        return 0
+
+
+def make_media_token(
+    chat_id: Any,
+    message_id: Any,
+    kind: str = "v",
+    size: int = 0,
+    name: str = "",
+    ttl_days: Optional[int] = None,
+) -> str:
+    """Ek lecture node ke Telegram source ko chhupane wala token ("" = key missing).
+
+    kind: "v" = video · "p" = pdf/document
+    """
+    key = vault_key()
+    if key is None:
+        return ""
+    from cryptography.hazmat.primitives.ciphers.aead import AESGCM
+
+    ttl = token_ttl_days() if ttl_days is None else int(ttl_days)
+    now_ms = int(time.time() * 1000)
+    exp = 0 if ttl == 0 else int(now_ms // 1000) + int(ttl * 86400)
+    window = int(now_ms // (ttl * 86400 * 1000)) if ttl > 0 else 0
+    seed = "%s|%s|%s|%s" % (chat_id, message_id, kind, window)
+    iv = hashlib.sha256(("%s|%s" % (master_secret(), seed)).encode("utf-8")).digest()[:12]
+    payload = {
+        "c": str(chat_id),
+        "m": int(message_id),
+        "k": str(kind or "v"),
+        "s": int(size or 0),
+        "n": str(name or "")[:180],
+        "mt": now_ms,
+        "exp": exp,
+    }
+    sealed = AESGCM(key).encrypt(
+        iv,
+        json.dumps(payload, ensure_ascii=False, separators=(",", ":")).encode("utf-8"),
+        None,
+    )
+    data, tag = sealed[:-16], sealed[-16:]
+    return "tg_%s_%s_%s" % (_b64url_encode(iv), _b64url_encode(tag), _b64url_encode(data))
+
+
+#: ⚠️ base64url alphabet me `_` bhi aata hai → split("_") galat hai, lengths FIXED hain
+TOKEN_IV_CHARS = 16  # 12 bytes base64url (no padding)
+TOKEN_TAG_CHARS = 22  # 16 bytes base64url (no padding)
+
+
+def read_media_token(token: str) -> Optional[Dict[str, Any]]:
+    """tg_<iv>_<tag>_<ct> → {chatId, messageId, kind, size, name, exp} | None."""
+    if not token or not str(token).startswith("tg_"):
+        return None
+    key = vault_key()
+    if key is None:
+        return None
+    body = str(token)[3:]
+    if len(body) <= TOKEN_IV_CHARS + 1 + TOKEN_TAG_CHARS + 1:
+        return None
+    iv_part = body[:TOKEN_IV_CHARS]
+    tag_part = body[TOKEN_IV_CHARS + 1 : TOKEN_IV_CHARS + 1 + TOKEN_TAG_CHARS]
+    ct_part = body[TOKEN_IV_CHARS + 1 + TOKEN_TAG_CHARS + 1 :]
+    if body[TOKEN_IV_CHARS] != "_" or body[TOKEN_IV_CHARS + 1 + TOKEN_TAG_CHARS] != "_" or not ct_part:
+        return None
+    try:
+        from cryptography.hazmat.primitives.ciphers.aead import AESGCM
+
+        plain = AESGCM(key).decrypt(
+            _b64url_decode(iv_part),
+            _b64url_decode(ct_part) + _b64url_decode(tag_part),
+            None,
+        )
+        data = json.loads(plain.decode("utf-8"))
+        exp = int(data.get("exp") or 0)
+        if exp and exp < int(time.time()):
+            return None  # expired
+        return {
+            "chatId": str(data.get("c") or ""),
+            "messageId": int(data.get("m") or 0),
+            "kind": str(data.get("k") or "v"),
+            "size": int(data.get("s") or 0),
+            "name": str(data.get("n") or ""),
+            "exp": exp,
+        }
+    except Exception:  # noqa: BLE001
+        return None
+
+
+# ─────────────────────────────────────────────────────────────────────────────
 # GRAMJS  →  TELETHON  SESSION CONVERTER
 # ─────────────────────────────────────────────────────────────────────────────
 def _ip_to_bytes(ip: str) -> bytes:
@@ -655,7 +764,14 @@ class Store:
     def claim_tasks(self) -> List[Dict[str, Any]]:
         out = []
         for key, val in (self.children("%s/tasks" % STATE_PREFIX) or {}).items():
-            if isinstance(val, dict) and val.get("status") in (None, "pending"):
+            # website "queued" likhti hai, purane records "pending"/None — sab claim honge
+            if isinstance(val, dict) and str(val.get("status") or "pending").lower() in (
+                "",
+                "pending",
+                "queued",
+                "new",
+                "retry",
+            ):
                 val = dict(val)
                 val["_key"] = key
                 out.append(val)
@@ -663,10 +779,12 @@ class Store:
         return out
 
     def mark_task(self, key: str, status: str, result: str = "") -> bool:
-        return self.set(
-            "%s/tasks/%s" % (STATE_PREFIX, key),
-            {"status": status, "result": result, "doneAt": _now_ms()},
-        )
+        """Status/result likho — task ke baaki fields (type, chatId…) preserve rehte hain."""
+        path = "%s/tasks/%s" % (STATE_PREFIX, key)
+        existing = self.get(path)
+        record = dict(existing) if isinstance(existing, dict) else {}
+        record.update({"status": str(status), "result": str(result or "")[:500], "doneAt": _now_ms()})
+        return self.set(path, record)
 
 
 # ─────────────────────────────────────────────────────────────────────────────
@@ -1023,11 +1141,24 @@ def clean_text(text: str, drop_extractor_lines: bool = True) -> str:
     return s.strip(" \t-–—:|•\n")
 
 
+#: 🇮🇳 Devanagari digits (०-९) → ASCII, taaki "भाग ५" == "part 5" compare ho
+DEV_DIGIT_MAP = {ord(c): str(i) for i, c in enumerate("०१२३४५६७८९")}
+
+#: nukta (़) — क़/क, ज़/ज अलग-अलग channel me अलग लिखे आते हैं → एक कर दो
+DEV_NUKTA = "\u093c"
+
+
 def normalize(text: str) -> str:
-    """Compare ke liye canonical form: NFKC + lowercase + sirf word chars."""
+    """Compare ke liye canonical form: NFKC + lowercase + sirf word chars.
+
+    🇮🇳 Devanagari hardening: digits ०-९ → 0-9 aur nukta (़) hataya jata hai,
+    warna Hindi captions me "भाग ५" vs "Part 5" ya "क़" vs "क" ki wajah se
+    auto-scan ka match toot jata.
+    """
     if not text:
         return ""
     s = unicodedata.normalize("NFKC", str(text)).lower()
+    s = s.translate(DEV_DIGIT_MAP).replace(DEV_NUKTA, "")
     s = strip_usernames(s)
     # part/lecture numbers ko canonical banao: "part -2", "part 02" → "part 2"
     s = PART_RE.sub(lambda m: " part %s " % int(m.group(1)), s)
@@ -1449,6 +1580,587 @@ def search_query(title: str, topic: str = "") -> str:
     if not words:
         words = [w for w in tokenize(topic) if len(w) >= 3][:4]
     return " ".join(words)[:90].strip()
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+# 🧲 AUTO-SCAN — admin ki channel list → course JSON ke lectures par token attach
+#
+#   Poora channel EK pass me padha jata hai. Har media message ka caption parse
+#   hota hai, phir data/batches/*.json ke har bina-token wale lecture se compare:
+#   title + topic(folder path) + course naam. Jo score >= BOT_SCAN_MIN_SCORE
+#   (default 75) jeeta, uska Telegram source encrypted token ban kar Firebase
+#   overlay (custom_batches/<id>.tree) me chala jata hai — bilkul wahi shape jo
+#   admin ka "Add by URL" likhta hai. Uske baad website par ▶ dabate hi bot ko
+#   chatId + messageId mil jata hai (DIRECT HIT) — channel dobara search nahi hota.
+#
+#   Safety rails:
+#     • sirf EXISTING lecture nodes par attach — naya node kabhi nahi banta
+#     • data/batches/*.json FILE kabhi modify nahi hoti (sirf DB overlay)
+#     • pehle se attached node skip (dobara scan = no-op)
+#     • ek Telegram message sirf EK lecture ko (sabse high score wale ko)
+#     • part-number alag → score 0 (Part 3 ki video Part 4 par nahi jayegi)
+#     • course naam alag → flexible check ke baad bhi fail to reject
+#     • sirf BOT_SCAN_CHATS wale channels padhe jate hain (baaki dialogs ignore)
+# ─────────────────────────────────────────────────────────────────────────────
+CUSTOM_BATCH_PATH = "custom_batches"
+GROUPS_PATH = "telegram_vault/groups"
+BATCH_META_PATH = "site_settings/batch_meta"
+DELETED_BATCH_PATH = "site_settings/deleted_batches"
+
+#: Repo ke andar course JSON — bot (Render par) tree yahin se padhta hai
+DEFAULT_DATA_DIR = os.path.join(
+    os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "data", "batches"
+)
+
+INVITE_RE = re.compile(
+    r"(?:t\.me|telegram\.me|telegram\.dog)/(?:c/|\+|joinchat/|addlist/)?"
+    r"([A-Za-z][A-Za-z0-9_]{3,40}|-?\d{4,20})",
+    re.IGNORECASE,
+)
+
+
+def scan_chats() -> List[str]:
+    """BOT_SCAN_CHATS → channel list (@handle / -100xxxxxxxxxx / invite link).
+
+    Comma, space, semicolon ya newline se alag — 10-15 channels aaram se.
+    Yahi list delivery-search ko bhi limit karti hai.
+    """
+    raw = env("BOT_SCAN_CHATS")
+    if not raw:
+        return []
+    out: List[str] = []
+    for part in re.split(r"[,\s;]+", raw.strip()):
+        item = part.strip().strip('"').strip("'").strip()
+        if item and item not in out:
+            out.append(item)
+    return out
+
+
+def scan_min_score() -> float:
+    """Attach karne ke liye minimum match score (delivery threshold se kabhi kam nahi)."""
+    raw = env("BOT_SCAN_MIN_SCORE")
+    try:
+        value = float(raw) if raw else 75.0
+    except (TypeError, ValueError):
+        return 75.0
+    return min(100.0, max(MATCH_THRESHOLD, value))
+
+
+def scan_message_limit() -> int:
+    """Har channel ke kitne recent messages padhne hain."""
+    raw = env("BOT_SCAN_MESSAGE_LIMIT")
+    try:
+        value = int(float(raw)) if raw else 400
+    except (TypeError, ValueError):
+        return 400
+    return min(3000, max(20, value))
+
+
+def data_dir() -> str:
+    return env("BOT_DATA_DIR") or DEFAULT_DATA_DIR
+
+
+def fb_key(value: Any) -> str:
+    """Firebase key-safe banao (. # $ [ ] / allowed nahi hain)."""
+    return re.sub(r"[.#$\[\]/]", "_", str(value or "")).strip("_") or "unknown"
+
+
+def chat_spec_key(spec: Any) -> str:
+    """Channel id/link → compare key: '@DishaBatch' → 'dishabatch', '-1001234' → '1234'."""
+    text = str(spec or "").strip()
+    if not text:
+        return ""
+    m = INVITE_RE.search(text)
+    if m:
+        text = m.group(1)
+    text = text.lstrip("@").lower().strip()
+    if text.startswith("-100"):
+        text = text[4:]
+    return text.lstrip("-")
+
+
+def invite_hash(link: Any) -> str:
+    """Private invite link ka hash (t.me/+AbCd / joinchat/AbCd) — warna ''."""
+    m = re.search(
+        r"(?:t\.me|telegram\.me|telegram\.dog)/(?:\+|joinchat/|addlist/)([A-Za-z0-9_\-+=]+)",
+        str(link or ""),
+    )
+    return m.group(1) if m else ""
+
+
+def chat_id_from_link(link: Any) -> str:
+    """t.me channel/post link → '@name' ya '-100xxxxxxxxxx' (invite → '')."""
+    text = str(link or "").strip()
+    if not text or invite_hash(text):
+        return ""
+    m = INVITE_RE.search(text)
+    if not m:
+        return ""
+    value = m.group(1)
+    if value.lstrip("-").isdigit():
+        return "-100%s" % value.lstrip("-")
+    return "@%s" % value
+
+
+def entity_keys(entity: Any) -> set:
+    """Ek Telethon entity ke saare compare keys (username + numeric id ke roop)."""
+    out = set()
+    username = str(getattr(entity, "username", "") or "").strip()
+    if username:
+        out.add(chat_spec_key(username))
+    try:
+        eid = int(getattr(entity, "id", 0) or 0)
+    except (TypeError, ValueError):
+        eid = 0
+    if eid:
+        out.add(chat_spec_key(str(eid)))
+        out.add(chat_spec_key("-100%s" % eid))
+        out.add(chat_spec_key(str(-eid)))
+    out.discard("")
+    return out
+
+
+def entity_in_specs(entity: Any, keys: Any) -> bool:
+    """Allowlist khaali → sab allowed; warna sirf BOT_SCAN_CHATS wale channels."""
+    key_set = set(keys or ())
+    if not key_set:
+        return True
+    return bool(entity_keys(entity) & key_set)
+
+
+# ── course tree (website ka data) ────────────────────────────────────────────
+def node_media_kind(node_type: Any) -> str:
+    """JSON node type → 'video' | 'pdf' | '' (FOLDER/unknown skip)."""
+    value = str(node_type or "").strip().upper()
+    if value in ("VIDEO", "VIDEOS", "STREAM", "LIVE", "RECORDING"):
+        return "video"
+    if value in ("FILE", "FILES", "DOCUMENT", "PDF", "ATTACHMENT", "NOTES"):
+        return "pdf"
+    return ""
+
+
+def message_media_kind(message: Any) -> str:
+    """Telegram message → 'video' | 'pdf' | '' (photo/audio-only skip)."""
+    if getattr(message, "video", None) or getattr(message, "round", None):
+        return "video"
+    doc = getattr(message, "document", None)
+    if doc is None:
+        return ""
+    for attr in getattr(doc, "attributes", None) or []:
+        if type(attr).__name__ in ("DocumentAttributeVideo", "DocumentAttributeAnimated"):
+            return "video"
+    mime = str(getattr(doc, "mime_type", "") or "").lower()
+    name = str(_media_name(message) or "").lower()
+    if mime.startswith("video/"):
+        return "video"
+    if mime == "application/pdf" or name.endswith(".pdf"):
+        return "pdf"
+    if mime.startswith(("application/", "text/")) or name.endswith(
+        (".doc", ".docx", ".ppt", ".pptx", ".zip", ".rar", ".epub")
+    ):
+        return "pdf"
+    return ""
+
+
+def flatten_nodes(
+    tree: Any,
+    trail: Optional[List[str]] = None,
+    out: Optional[List[Dict[str, Any]]] = None,
+    depth: int = 0,
+) -> List[Dict[str, Any]]:
+    """Course tree → flat list (folder path = topic). FOLDER bhi aate hain."""
+    trail = list(trail or [])
+    out = out if out is not None else []
+    if depth > 40 or not isinstance(tree, list):
+        return out
+    for node in tree:
+        if not isinstance(node, dict):
+            continue
+        title = clean_text(str(node.get("title") or ""))
+        out.append(
+            {
+                "id": str(node.get("id") or ""),
+                "title": title,
+                "type": node.get("type"),
+                "topic": " › ".join([p for p in trail[-3:] if p]),
+                "tg_video_token": node.get("tg_video_token"),
+                "tg_pdf_token": node.get("tg_pdf_token"),
+            }
+        )
+        children = node.get("children")
+        if isinstance(children, list) and children:
+            flatten_nodes(children, trail + ([title] if title else []), out, depth + 1)
+    return out
+
+
+def load_file_batches() -> Dict[str, Dict[str, Any]]:
+    """data/batches/*.json → {batchId: data} (server.js:loadFileBatches ka port)."""
+    out: Dict[str, Dict[str, Any]] = {}
+    folder = data_dir()
+    try:
+        names = sorted(os.listdir(folder))
+    except OSError:
+        return out
+    for name in names:
+        if not name.endswith(".json"):
+            continue
+        try:
+            with open(os.path.join(folder, name), "r", encoding="utf-8") as handle:
+                data = json.load(handle)
+        except Exception as exc:  # noqa: BLE001
+            log("scan: skip %s (%s)" % (name, short_error(exc)))
+            continue
+        if not isinstance(data, dict):
+            continue
+        batch_id = str(data.get("id") or name[:-5].split("_")[-1] or "").strip()
+        if batch_id:
+            out[batch_id] = data
+    return out
+
+
+def merge_overlay(base: List[Dict[str, Any]], overlay: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
+    """server.js:mergeOverlay ka Python port.
+
+    Same id → overlay ke fields jeet-te hain (children/id chhod kar).
+    Naya node → apne parent_id ke andar, warna root par append.
+    ⚠️ `base` MUTATE hota hai → hamesha copy bhejiye.
+    """
+    index: Dict[str, Dict[str, Any]] = {}
+
+    def walk_index(nodes: Any, depth: int = 0) -> None:
+        if depth > 40 or not isinstance(nodes, list):
+            return
+        for node in nodes:
+            if not isinstance(node, dict):
+                continue
+            index[str(node.get("id"))] = node
+            if isinstance(node.get("children"), list):
+                walk_index(node["children"], depth + 1)
+
+    walk_index(base)
+    fresh: List[Dict[str, Any]] = []
+
+    def walk(nodes: Any, depth: int = 0) -> None:
+        if depth > 40 or not isinstance(nodes, list):
+            return
+        for node in nodes:
+            if not isinstance(node, dict):
+                continue
+            target = index.get(str(node.get("id")))
+            if target is None:
+                fresh.append(node)
+                continue
+            for key, value in node.items():
+                if key in ("children", "id") or value is None:
+                    continue
+                target[key] = value
+            children = node.get("children")
+            if isinstance(children, list):
+                if not isinstance(target.get("children"), list):
+                    target["children"] = []
+                walk(children, depth + 1)
+                have = {str(c.get("id")) for c in target["children"] if isinstance(c, dict)}
+                for child in children:
+                    if isinstance(child, dict) and str(child.get("id")) not in have:
+                        target["children"].append(child)
+                        index[str(child.get("id"))] = child
+
+    walk(overlay)
+
+    for node in fresh:
+        parent = index.get(str(node.get("parent_id") or ""))
+        bucket = parent["children"] if parent is not None and isinstance(parent.get("children"), list) else None
+        if parent is not None and bucket is None:
+            parent["children"] = bucket = []
+        if bucket is not None:
+            bucket.append(node)
+        else:
+            base.append(node)
+        index[str(node.get("id"))] = node
+    return base
+
+
+def load_course_nodes(store: Any = None, batch_id: str = "") -> List[Dict[str, Any]]:
+    """Website ke lecture nodes (file tree + Firebase overlay merged).
+
+    → [{batchId, batchName, nodeId, title, topic, kind, hasToken, _tokens, _bigrams}]
+    FOLDER skip; `batch_id` diya ho to sirf usi course ke nodes.
+    """
+    wanted = str(batch_id or "").strip()
+    deleted: Any = {}
+    overlays: Any = {}
+    meta: Any = {}
+    if store is not None:
+        try:
+            deleted = store.get(DELETED_BATCH_PATH) or {}
+            overlays = store.children(CUSTOM_BATCH_PATH) or {}
+            meta = store.children(BATCH_META_PATH) or {}
+        except Exception as exc:  # noqa: BLE001
+            log("scan: overlay read failed (%s) — sirf file tree use hoga" % short_error(exc))
+    deleted = deleted if isinstance(deleted, dict) else {}
+    overlays = overlays if isinstance(overlays, dict) else {}
+    meta = meta if isinstance(meta, dict) else {}
+
+    batches = load_file_batches()
+    ids = [wanted] if wanted else sorted(set(list(batches.keys()) + [str(k) for k in overlays.keys()]))
+
+    nodes: List[Dict[str, Any]] = []
+    for bid in ids:
+        if not bid or bid in deleted:
+            continue
+        file_data = batches.get(bid) if isinstance(batches.get(bid), dict) else {}
+        overlay = overlays.get(bid) if isinstance(overlays.get(bid), dict) else {}
+        meta_row = meta.get(bid) if isinstance(meta.get(bid), dict) else {}
+        base_tree = file_data.get("tree")
+        base_tree = json.loads(json.dumps(base_tree)) if isinstance(base_tree, list) else []
+        overlay_tree = overlay.get("tree")
+        overlay_tree = overlay_tree if isinstance(overlay_tree, list) else []
+        tree = merge_overlay(base_tree, overlay_tree) if overlay_tree else base_tree
+        name = str(
+            meta_row.get("name") or overlay.get("name") or file_data.get("name") or "Course %s" % bid
+        )
+        for row in flatten_nodes(tree):
+            kind = node_media_kind(row.get("type"))
+            if not kind or not row.get("id"):
+                continue
+            title = clean_text(str(row.get("title") or ""))
+            norm_title = normalize(title)
+            nodes.append(
+                {
+                    "batchId": bid,
+                    "batchName": name,
+                    "nodeId": str(row.get("id")),
+                    "title": title,
+                    "topic": str(row.get("topic") or ""),
+                    "kind": kind,
+                    "hasToken": bool(row.get("tg_video_token") or row.get("tg_pdf_token")),
+                    "_tokens": set(tokenize(norm_title)),
+                    "_sig": significant_tokens(title),
+                    "_bigrams": _char_bigrams(norm_title),
+                }
+            )
+    return nodes
+
+
+# ── matching (scan ke liye) ──────────────────────────────────────────────────
+def scan_request(node: Dict[str, Any]) -> Dict[str, Any]:
+    """Course node → score_candidate() ka 'request' shape."""
+    return {
+        "title": node.get("title") or "",
+        "topic": node.get("topic") or "",
+        "courseName": node.get("batchName") or "",
+        "fileSize": 0,
+        "part": None,
+    }
+
+
+#: 🧲 Prefilter ke liye "structural" tokens — yeh har lecture me aate hain
+#:    ("Part 1", "Lecture 12", "Class 5"), isliye inke overlap ko match ka
+#:    saboot nahi maana ja sakta. Full scoring (score_candidate) inhe waise bhi
+#:    part-number guard se handle karta hai; yahan sirf speed ke liye ignore.
+SCAN_STOP_TOKENS = frozenset(
+    {
+        "part", "parts", "lecture", "lectures", "lec", "class", "classes", "day", "days",
+        "ep", "episode", "video", "videos", "pdf", "pdfs", "note", "notes", "file", "files",
+        "session", "sessions", "chapter", "chapters", "unit", "units", "topic", "topics",
+        "subject", "course", "batch", "study", "material", "materials", "all", "new", "old",
+        "free", "complete", "full", "handwritten", "module", "test", "dpp", "sheet",
+        "the", "of", "for", "and", "in", "on", "to", "a", "an", "by", "with", "from",
+        "लेक्चर", "क्लास", "भाग", "पार्ट", "वीडियो", "अध्याय", "खंड", "दिन", "कोर्स",
+        "बैच", "विषय", "फाइल", "नोट्स", "सभी", "पूरा",
+    }
+)
+
+
+def significant_tokens(text: Any) -> set:
+    """Sirf meaningful words (structural words aur pure numbers hata kar)."""
+    return {t for t in tokenize(normalize(text)) if t and not t.isdigit() and t not in SCAN_STOP_TOKENS}
+
+
+def shortlist_nodes(nodes: List[Dict[str, Any]], cand: Dict[str, Any]) -> List[Dict[str, Any]]:
+    """Sasta prefilter — full scoring se pehle obviously-alag nodes hata do.
+
+    400 messages × 600 nodes = 2.4 lakh full scoring calls; yeh step wahi kaam
+    ~1% me kar deta hai (score bilkul wahi rehta hai, sirf speed badhti hai).
+    Rule: koi MEANINGFUL word common ho, ya char-bigram dice >= 0.34 (spelling
+    variant / Devanagari-Roman farak). Prefilter sirf candidates chunta hai —
+    faisla hamesha score_candidate() ka hi hota hai.
+    """
+    parsed = cand.get("parsed") or {}
+    caption_title = str(parsed.get("title") or "")
+    file_name = str(cand.get("file_name") or "")
+    norm = normalize(caption_title or file_name)
+    tokens = significant_tokens(caption_title or file_name)
+    tokens |= significant_tokens(file_name)
+    tokens |= significant_tokens(str(parsed.get("topic") or ""))
+    bigrams = _char_bigrams(norm)
+    if not tokens and not bigrams:
+        return []
+    out: List[Dict[str, Any]] = []
+    for node in nodes:
+        if node.get("hasToken"):
+            continue
+        if node.get("_sig") & tokens:
+            out.append(node)
+            continue
+        node_bigrams = node.get("_bigrams") or set()
+        if node_bigrams and bigrams:
+            dice = 2.0 * len(node_bigrams & bigrams) / (len(node_bigrams) + len(bigrams))
+            if dice >= 0.34:
+                out.append(node)
+    return out
+
+
+def assign_matches(
+    pairs: List[Dict[str, Any]], min_score: float
+) -> Tuple[List[Dict[str, Any]], List[Dict[str, Any]]]:
+    """(node, message) pairs → (final attach list, dropped list).
+
+      1. har lecture ka best-scoring message
+      2. ek message sirf EK lecture ko — warna ek hi video do lectures par chali jaati
+    """
+    best_node: Dict[Tuple[str, str], Dict[str, Any]] = {}
+    for pair in pairs:
+        score = float(pair.get("score") or 0)
+        if score < float(min_score):
+            continue
+        node = pair.get("node") or {}
+        key = (str(node.get("batchId") or ""), str(node.get("nodeId") or ""))
+        current = best_node.get(key)
+        if current is None or score > float(current.get("score") or 0):
+            best_node[key] = pair
+
+    best_msg: Dict[Tuple[str, int], Dict[str, Any]] = {}
+    for pair in best_node.values():
+        key = (str(pair.get("chatId") or ""), int(pair.get("messageId") or 0))
+        current = best_msg.get(key)
+        if current is None or float(pair.get("score") or 0) > float(current.get("score") or 0):
+            best_msg[key] = pair
+
+    assigned = sorted(best_msg.values(), key=lambda p: -float(p.get("score") or 0))
+    chosen = {(str(p["node"]["batchId"]), str(p["node"]["nodeId"])) for p in assigned}
+    dropped = [pair for key, pair in best_node.items() if key not in chosen]
+    return assigned, dropped
+
+
+def source_link(chat_id: Any, message_id: Any, channel_kind: str) -> str:
+    """Token ke liye human-readable post link (admin panel me dikhta hai)."""
+    if str(channel_kind) == "public":
+        return "https://t.me/%s/%s" % (str(chat_id).lstrip("@"), message_id)
+    digits = str(chat_id)
+    if digits.startswith("-100"):
+        digits = digits[4:]
+    return "https://t.me/c/%s/%s" % (digits.lstrip("-"), message_id)
+
+
+def build_node_patch(
+    node: Dict[str, Any],
+    chat_id: Any,
+    message_id: Any,
+    size: int = 0,
+    name: str = "",
+    channel_kind: str = "private",
+    score: float = 0.0,
+) -> Optional[Dict[str, Any]]:
+    """Admin 'Add by URL' jaisa hi overlay patch (source: telegram_scan).
+
+    None → vault key missing (ADMIN_SESSION_SECRET set nahi) — attach possible nahi.
+    """
+    is_video = str(node.get("kind") or "") == "video"
+    token = make_media_token(
+        chat_id,
+        message_id,
+        kind="v" if is_video else "p",
+        size=int(size or 0),
+        name=str(name or node.get("title") or "")[:180],
+    )
+    if not token:
+        return None
+    return {
+        "id": str(node.get("nodeId") or ""),
+        ("tg_video_token" if is_video else "tg_pdf_token"): token,
+        "tg_meta": {
+            "media": "video" if is_video else "pdf",
+            "chatId": str(chat_id),
+            "messageId": int(message_id),
+            "kind": str(channel_kind),
+            "attachedAt": int(time.time() * 1000),
+            "link": source_link(chat_id, message_id, channel_kind),
+            "score": round(float(score or 0), 2),
+            "by": "auto_scan",
+        },
+        "source": "telegram_scan",
+    }
+
+
+def save_attach_patches(
+    store: Any, patches_by_batch: Dict[str, List[Dict[str, Any]]], batch_names: Dict[str, str]
+) -> Dict[str, Any]:
+    """Overlay patches ko Firebase `custom_batches/<id>.tree` me likho.
+
+    Read-modify-write: pehle se attached tokens kabhi khote nahi (merge_overlay).
+    """
+    out = {"saved": 0, "batches": [], "errors": []}
+    for bid, patches in (patches_by_batch or {}).items():
+        if not patches:
+            continue
+        try:
+            existing = store.get("%s/%s" % (CUSTOM_BATCH_PATH, bid))
+            existing = existing if isinstance(existing, dict) else {}
+            tree = existing.get("tree")
+            tree = json.loads(json.dumps(tree)) if isinstance(tree, list) else []
+            tree = merge_overlay(tree, patches)
+            record = {
+                "id": str(bid),
+                "name": str(existing.get("name") or batch_names.get(bid) or "Course %s" % bid),
+                "tree": tree,
+                "updatedAt": int(time.time() * 1000),
+                "source": str(existing.get("source") or "custom"),
+                "telegramAttached": True,
+                "lastScanAt": int(time.time() * 1000),
+            }
+            if store.set("%s/%s" % (CUSTOM_BATCH_PATH, bid), record):
+                out["saved"] += len(patches)
+                out["batches"].append({"batchId": str(bid), "attached": len(patches)})
+            else:
+                out["errors"].append("%s: store.set failed" % bid)
+        except Exception as exc:  # noqa: BLE001
+            out["errors"].append("%s: %s" % (bid, short_error(exc)))
+    return out
+
+
+def scan_summary_text(result: Dict[str, Any]) -> str:
+    """Scan result → English summary (Telegram reply + admin task result)."""
+    lines = [
+        "🧲 Auto-scan finished",
+        "",
+        "Channels scanned: %d" % len(result.get("chats") or []),
+        "Messages read: %d (media %d)" % (int(result.get("messages") or 0), int(result.get("media") or 0)),
+        "Lectures matched: %d" % int(result.get("matched") or 0),
+        "Links attached: %d" % int(result.get("attached") or 0),
+        "Still without a link: %d" % int(result.get("unmatched") or 0),
+        "Already attached (skipped): %d" % int(result.get("skippedAlready") or 0),
+        "Match threshold: %.0f/100" % float(result.get("threshold") or 0),
+        "Time: %ss" % result.get("durationSec", 0),
+    ]
+    per_chat = result.get("chats") or []
+    if per_chat:
+        lines += ["", "Per channel:"]
+        for row in per_chat[:15]:
+            if row.get("error"):
+                detail = "⚠️ %s" % str(row.get("error"))[:80]
+            else:
+                detail = "%d media read" % int(row.get("media") or 0)
+            lines.append("• %s — %s" % (str(row.get("title") or row.get("chat") or "?")[:48], detail))
+    batches = result.get("batches") or []
+    if batches:
+        lines += ["", "Courses updated:"]
+        lines.extend("• %s → %d link(s)" % (b.get("batchId"), int(b.get("attached") or 0)) for b in batches[:12])
+    errors = result.get("errors") or []
+    if errors:
+        lines += ["", "Errors:"]
+        lines.extend("• %s" % str(e)[:120] for e in errors[:6])
+    return "\n".join(lines)
 
 
 # ─────────────────────────────────────────────────────────────────────────────
@@ -1941,6 +2653,7 @@ MSG_HELP_ADMIN = (
     "/limit_all <n> — change the default limit for everyone\n"
     "/limit_default <n> — same as limit_all\n"
     "/broadcast <message> — send a message to all users\n"
+    "/scan [ids] — scan channels and auto-attach lecture links (BOT_SCAN_CHATS)\n"
     "/ban <userId>  /unban <userId>\n"
     "/pending — videos waiting to be auto-deleted\n"
     "/config — show current configuration\n"
@@ -2580,6 +3293,56 @@ class DeliveryBot:
             await event.reply("📣 Broadcast finished.\nSent: %d\nFailed: %d" % (sent, failed))
             return
 
+        if cmd in ("/scan", "/autoscan", "/scan_group"):
+            # 🧲 AUTO-SCAN: channels padho → course lectures par links khud attach karo
+            specs: List[str] = []
+            for piece in re.split(r"[,\s]+", str(arg or "").strip()):
+                piece = piece.strip()
+                if piece and piece not in specs:
+                    specs.append(piece)
+            listed = specs or scan_chats()
+            if not listed:
+                await event.reply(
+                    "No channels to scan.\n\n"
+                    "Set BOT_SCAN_CHATS in the bot environment (Render → Environment), "
+                    "or pass ids with this command:\n"
+                    "/scan @channelname, -1001234567890"
+                )
+                return
+            status = await event.reply(
+                "🧲 Scanning %d channel(s)…\nThis can take a few minutes. "
+                "Matched lectures get their link attached automatically." % len(listed)
+            )
+            counter = {"done": 0}
+
+            async def progress(report: Dict[str, Any]) -> None:
+                counter["done"] += 1
+                try:
+                    await self.bot.edit_message(
+                        uid,
+                        status.id,
+                        "🧲 Scanning… %d/%d channel(s)\nlast: %s"
+                        % (
+                            counter["done"],
+                            len(listed),
+                            str(report.get("title") or report.get("chat") or "?")[:48],
+                        ),
+                    )
+                except Exception:  # noqa: BLE001
+                    pass
+
+            try:
+                result = await self.scan_and_attach(chats=listed, progress=progress)
+            except Exception as exc:  # noqa: BLE001
+                await event.reply("⚠️ Scan failed: %s" % short_error(exc))
+                return
+            text = scan_summary_text(result)[:4000]
+            try:
+                await self.bot.edit_message(uid, status.id, text)
+            except Exception:  # noqa: BLE001
+                await event.reply(text)
+            return
+
         if cmd in ("/ban", "/unban"):
             nums = re.findall(r"-?\d+", arg)
             if not nums:
@@ -3117,16 +3880,32 @@ class DeliveryBot:
             return None
 
         ranked: List[Tuple[float, Any]] = []
+        # 🔒 BOT_SCAN_CHATS set ho to SIRF wahi channels search hote hain
+        #    (owner rule: 10-15 fixed channels — poore account ke dialogs nahi).
+        #    Exception: website ke token wala chat (direct hit ka fallback).
+        allow_specs = scan_chats()
+        allow_keys = {chat_spec_key(s) for s in allow_specs} - {""}
+        allow_keys |= {chat_spec_key(chat_id_from_link(s)) for s in allow_specs} - {""}
+        skipped_dialogs = 0
         for dialog in dialogs:
             entity = getattr(dialog, "entity", None)
             if entity is None or getattr(dialog, "is_user", False):
                 continue
+            is_direct = direct_entity is not None and _same_entity(entity, direct_entity)
+            if allow_keys and not is_direct and not entity_in_specs(entity, allow_keys):
+                skipped_dialogs += 1
+                continue
             name = getattr(dialog, "title", "") or getattr(entity, "title", "") or ""
             score = course_match_score(course, name) if course else 0.5
-            if direct_entity is not None and _same_entity(entity, direct_entity):
+            if is_direct:
                 score += 10.0  # website wala chat sabse pehle
             ranked.append((score, entity))
         ranked.sort(key=lambda item: -item[0])
+        if allow_keys:
+            log(
+                "search allowlist: %d channel(s) • %d dialog(s) skipped • %d chat(s) search honge"
+                % (len(allow_keys), skipped_dialogs, len(ranked))
+            )
 
         query = search_query(title, topic)
 
@@ -3201,6 +3980,13 @@ class DeliveryBot:
 
     async def _resolve_chat(self, chat_id: str) -> Any:
         text = str(chat_id).strip()
+        if not text:
+            raise ValueError("empty chat id")
+        # 🔗 link aaya ho (@name/123 ya t.me/c/1234/56) → pehle chat id banao
+        if "t.me/" in text or "telegram.me/" in text or "telegram.dog/" in text:
+            if invite_hash(text):
+                return await self._import_invite(text)
+            text = chat_id_from_link(text) or text
         if text.startswith("@"):
             return await self.user.get_entity(text)
         try:
@@ -3217,6 +4003,304 @@ class DeliveryBot:
                 except Exception:
                     pass
             raise
+
+    async def _import_invite(self, link: str) -> Any:
+        """Private invite link (t.me/+AbCd) → join/import karke entity.
+
+        Session pehle se member ho to Telegram 'already joined' error deta hai —
+        us surat me dialog list se entity nikal lete hain.
+        """
+        hash_value = invite_hash(link)
+        if not hash_value:
+            raise ValueError("invite link samajh nahi aaya: %s" % link)
+        from telethon import functions
+
+        try:
+            result = await self.user(functions.messages.ImportChatInviteRequest(hash=hash_value))
+            chats = list(getattr(result, "chats", None) or [])
+            if chats:
+                log("invite link se channel join ho gaya")
+                return chats[0]
+        except Exception as exc:  # noqa: BLE001
+            log("invite import: %s — dialogs me dhoondhte hain" % short_error(exc))
+        try:
+            async for dialog in self.user.iter_dialogs(limit=int(self._num("maxDialogs", 60))):
+                entity = getattr(dialog, "entity", None)
+                if entity is not None and hash_value.lower() in str(getattr(entity, "username", "") or "").lower():
+                    return entity
+        except Exception:  # noqa: BLE001
+            pass
+        raise ValueError("invite link se channel nahi mila — user session ko member hona chahiye")
+
+    # ── 🧲 AUTO-SCAN (admin panel task / /scan command) ─────────────────────
+    async def scan_and_attach(
+        self,
+        chats: Optional[List[str]] = None,
+        batch_id: str = "",
+        message_limit: Optional[int] = None,
+        min_score: Optional[float] = None,
+        progress: Optional[Callable[[Dict[str, Any]], Any]] = None,
+        task_key: str = "",
+    ) -> Dict[str, Any]:
+        """Channels padho → JSON course ke lectures par Telegram token AUTO-ATTACH.
+
+        `chats` khaali/None → env BOT_SCAN_CHATS. `batch_id` diya ho to sirf usi
+        course ke lectures match hote hain. Result dict me poora report hai.
+        """
+        started = time.time()
+        threshold = float(min_score) if min_score is not None else scan_min_score()
+        limit = int(message_limit or scan_message_limit())
+        specs = [str(s).strip() for s in (list(chats) if chats else scan_chats()) if str(s).strip()]
+
+        result: Dict[str, Any] = {
+            "ok": False,
+            "chats": [],
+            "messages": 0,
+            "media": 0,
+            "nodes": 0,
+            "matched": 0,
+            "attached": 0,
+            "skippedAlready": 0,
+            "unmatched": 0,
+            "droppedDuplicateMessage": 0,
+            "batches": [],
+            "threshold": threshold,
+            "messageLimit": limit,
+            "errors": [],
+            "startedAt": int(started * 1000),
+            "durationSec": 0.0,
+            "taskKey": str(task_key or ""),
+        }
+
+        if not specs:
+            result["errors"].append("BOT_SCAN_CHATS is empty — env me channel ids dijiye")
+            return result
+
+        nodes = load_course_nodes(self.store, batch_id=str(batch_id or ""))
+        todo = [n for n in nodes if not n.get("hasToken")]
+        result["nodes"] = len(nodes)
+        result["skippedAlready"] = len(nodes) - len(todo)
+        if not todo:
+            result["ok"] = True
+            result["durationSec"] = round(time.time() - started, 2)
+            result["errors"].append(
+                "no lecture left without a link (batchId=%s)" % (batch_id or "all")
+            )
+            return result
+
+        log(
+            "🧲 scan start: %d channel(s) • %d lecture(s) bina link • threshold %.0f • %d messages/channel"
+            % (len(specs), len(todo), threshold, limit)
+        )
+
+        pairs: List[Dict[str, Any]] = []
+        for spec in specs:
+            report, chat_pairs = await self._scan_one_chat(spec, todo, limit, threshold)
+            result["chats"].append(report)
+            result["messages"] += int(report.get("messages") or 0)
+            result["media"] += int(report.get("media") or 0)
+            pairs.extend(chat_pairs)
+            if report.get("error"):
+                result["errors"].append("%s: %s" % (spec, report["error"]))
+            self.store.log_event(
+                "scan_chat",
+                chat=str(report.get("chatId") or spec),
+                title=str(report.get("title") or "")[:120],
+                messages=int(report.get("messages") or 0),
+                media=int(report.get("media") or 0),
+                matched=len(chat_pairs),
+                error=str(report.get("error") or "")[:200],
+            )
+            if progress is not None:
+                try:
+                    await progress(report)
+                except Exception:  # noqa: BLE001
+                    pass
+
+        assigned, dropped = assign_matches(pairs, threshold)
+        result["matched"] = len(assigned)
+        result["droppedDuplicateMessage"] = len(dropped)
+        result["unmatched"] = max(0, len(todo) - len(assigned))
+
+        patches_by_batch: Dict[str, List[Dict[str, Any]]] = {}
+        batch_names: Dict[str, str] = {}
+        for item in assigned:
+            node = item.get("node") or {}
+            patch = build_node_patch(
+                node,
+                item.get("chatId"),
+                item.get("messageId"),
+                size=int(item.get("size") or 0),
+                name=str(item.get("name") or ""),
+                channel_kind=str(item.get("channelKind") or "private"),
+                score=float(item.get("score") or 0),
+            )
+            if patch is None:
+                result["errors"].append(
+                    "vault key missing — ADMIN_SESSION_SECRET set kijiye (website wali same)"
+                )
+                break
+            patches_by_batch.setdefault(str(node.get("batchId") or ""), []).append(patch)
+            batch_names[str(node.get("batchId") or "")] = str(node.get("batchName") or "")
+
+        saved = save_attach_patches(self.store, patches_by_batch, batch_names)
+        result["attached"] = int(saved.get("saved") or 0)
+        result["batches"] = saved.get("batches") or []
+        for err in saved.get("errors") or []:
+            result["errors"].append("save: %s" % err)
+
+        # 📇 channel registry — admin panel ki "Registered groups" table yahi padhta hai
+        for report in result["chats"]:
+            chat_id = str(report.get("chatId") or "")
+            if not chat_id and not report.get("title"):
+                continue
+            attached_here = sum(1 for a in assigned if str(a.get("chatId") or "") == chat_id)
+            self.store.set(
+                "%s/%s" % (GROUPS_PATH, fb_key(chat_id or report.get("chat"))),
+                {
+                    "title": str(report.get("title") or "")[:120],
+                    "chatId": chat_id,
+                    "itemCount": int(report.get("media") or 0),
+                    "messages": int(report.get("messages") or 0),
+                    "lastScanAt": int(time.time() * 1000),
+                    "matched": attached_here,
+                    "attached": attached_here,
+                    "unmatched": max(0, int(report.get("media") or 0) - attached_here),
+                    "threshold": threshold,
+                    "lastError": str(report.get("error") or "")[:200],
+                    "source": "auto_scan",
+                },
+            )
+
+        result["ok"] = bool(result["attached"]) or not result["errors"]
+        result["durationSec"] = round(time.time() - started, 2)
+        set_status(
+            lastScan={
+                "at": int(time.time() * 1000),
+                "attached": result["attached"],
+                "matched": result["matched"],
+                "unmatched": result["unmatched"],
+                "chats": len(result["chats"]),
+                "durationSec": result["durationSec"],
+                "errors": len(result["errors"]),
+            }
+        )
+        # 📊 website admin panel isi ko padhta hai (GET /api/admin/bot → scan)
+        self.store.set(
+            "%s/scan" % STATE_PREFIX,
+            {
+                "channels": len(specs),
+                "minScore": threshold,
+                "messageLimit": limit,
+                "messages": result["messages"],
+                "media": result["media"],
+                "matched": result["matched"],
+                "attached": result["attached"],
+                "unmatched": result["unmatched"],
+                "skippedAlready": result["skippedAlready"],
+                "durationSec": result["durationSec"],
+                "errors": len(result["errors"]),
+                "lastError": str((result["errors"] or [""])[0])[:200],
+                "lastAt": int(time.time() * 1000),
+                "by": "task" if task_key else "command",
+                "taskKey": str(task_key or ""),
+                "batchId": str(batch_id or ""),
+            },
+        )
+        self.store.log_event(
+            "scan",
+            chats=len(result["chats"]),
+            messages=result["messages"],
+            media=result["media"],
+            matched=result["matched"],
+            attached=result["attached"],
+            unmatched=result["unmatched"],
+            threshold=threshold,
+            durationSec=result["durationSec"],
+            errors=len(result["errors"]),
+        )
+        log(
+            "🧲 scan done in %ss • attached=%d • matched=%d • unmatched=%d • errors=%d"
+            % (result["durationSec"], result["attached"], result["matched"], result["unmatched"], len(result["errors"]))
+        )
+        return result
+
+    async def _scan_one_chat(
+        self, spec: str, nodes: List[Dict[str, Any]], limit: int, threshold: float
+    ) -> Tuple[Dict[str, Any], List[Dict[str, Any]]]:
+        """Ek channel padho → (report, matched pairs)."""
+        report: Dict[str, Any] = {
+            "chat": str(spec),
+            "title": "",
+            "chatId": "",
+            "public": False,
+            "messages": 0,
+            "media": 0,
+            "error": "",
+        }
+        pairs: List[Dict[str, Any]] = []
+        try:
+            entity = await self._resolve_chat(spec)
+        except Exception as exc:  # noqa: BLE001
+            report["error"] = "resolve failed: %s" % short_error(exc)
+            log("scan: %s → %s" % (spec, report["error"]))
+            return report, pairs
+
+        username = str(getattr(entity, "username", "") or "").strip()
+        try:
+            raw_id = int(getattr(entity, "id", 0) or 0)
+        except (TypeError, ValueError):
+            raw_id = 0
+        marked = 0
+        try:
+            from telethon import utils as tl_utils
+
+            marked = int(tl_utils.get_peer_id(entity))
+        except Exception:  # noqa: BLE001
+            # channel ka marked id = "-100" + internal id (string jod, guha nahi!)
+            marked = int("-100%d" % abs(raw_id)) if raw_id > 0 else raw_id
+        chat_id = "@%s" % username if username else str(marked or raw_id)
+        channel_kind = "public" if username else "private"
+        title = str(getattr(entity, "title", "") or username or chat_id)
+        report.update({"title": title[:120], "chatId": chat_id, "public": bool(username)})
+        log("scan: reading %s (%s) — up to %d messages" % (title[:48], chat_id, limit))
+
+        try:
+            async for message in self.user.iter_messages(entity, limit=int(limit)):
+                report["messages"] += 1
+                kind = message_media_kind(message)
+                if not kind:
+                    continue
+                report["media"] += 1
+                cand = _candidate_from_message(message)
+                cand["chat_id"] = chat_id  # token ke liye authoritative id
+                parsed = cand.get("parsed") or {}
+                for node in shortlist_nodes(nodes, cand):
+                    if str(node.get("kind") or "") != kind:
+                        continue  # VIDEO node par PDF attach nahi (aur ulta bhi nahi)
+                    scored = score_candidate(scan_request(node), cand)
+                    score = float(scored.get("score") or 0)
+                    if score < threshold:
+                        continue
+                    pairs.append(
+                        {
+                            "node": node,
+                            "score": score,
+                            "reason": str(scored.get("reason") or ""),
+                            "chatId": chat_id,
+                            "channelKind": channel_kind,
+                            "messageId": int(cand.get("message_id") or 0),
+                            "size": int(cand.get("file_size") or 0),
+                            "name": str(
+                                parsed.get("title") or cand.get("file_name") or node.get("title") or ""
+                            )[:180],
+                            "captionTitle": str(parsed.get("title") or "")[:120],
+                        }
+                    )
+        except Exception as exc:  # noqa: BLE001
+            report["error"] = "read failed: %s" % short_error(exc)
+            log("scan: %s" % report["error"])
+        return report, pairs
 
     # ── background loops ───────────────────────────────────────────────────
     async def _sweeper_loop(self) -> None:
@@ -3237,7 +4321,7 @@ class DeliveryBot:
             await asyncio.sleep(30)
 
     async def _task_poller_loop(self) -> None:
-        """Admin panel (website) se aaye tasks: broadcast / limit / config."""
+        """Admin panel (website) se aaye tasks: scan / broadcast / limit / config."""
         while not self._stopping:
             try:
                 for task in self.store.claim_tasks():
@@ -3268,6 +4352,31 @@ class DeliveryBot:
                                 self.store.save_config(payload)
                                 self.refresh_config()
                             self.store.mark_task(key, "done", "config updated")
+                        elif task_type in ("scan_group", "scan", "auto_scan"):
+                            # 🧲 channel scan → course lectures par links auto-attach
+                            specs: List[str] = []
+                            for field in ("chatId", "invite", "chat", "source", "link"):
+                                value = str(payload.get(field) or task.get(field) or "").strip()
+                                if value and value not in specs:
+                                    specs.append(value)
+                            batch = str(payload.get("batchId") or task.get("batchId") or "").strip()
+                            summary = await self.scan_and_attach(
+                                chats=specs or None, batch_id=batch, task_key=key
+                            )
+                            text = "attached=%d matched=%d unmatched=%d chats=%d errors=%d" % (
+                                int(summary.get("attached") or 0),
+                                int(summary.get("matched") or 0),
+                                int(summary.get("unmatched") or 0),
+                                len(summary.get("chats") or []),
+                                len(summary.get("errors") or []),
+                            )
+                            if summary.get("ok"):
+                                self.store.mark_task(key, "done", text)
+                            else:
+                                errors = summary.get("errors") or ["scan failed"]
+                                self.store.mark_task(
+                                    key, "error", "%s • %s" % (text, str(errors[0])[:180])
+                                )
                         else:
                             self.store.mark_task(key, "error", "unknown task type: %s" % task_type)
                     except Exception as exc:  # noqa: BLE001
@@ -3861,6 +4970,331 @@ def cmd_selftest() -> int:
     check("telethon detect", looks_like_telethon_session(telethon_str or ""))
     check("gramjs not misdetected", not looks_like_telethon_session(gramjs))
 
+    print("\n── 🧲 auto-scan (channel → course attach) ──────────────────────")
+    _scan_env_backup = {
+        k: os.environ.get(k)
+        for k in ("BOT_SCAN_CHATS", "BOT_SCAN_MIN_SCORE", "BOT_SCAN_MESSAGE_LIMIT", "BOT_DATA_DIR")
+    }
+
+    def _restore_scan_env() -> None:
+        for key, value in _scan_env_backup.items():
+            if value is None:
+                os.environ.pop(key, None)
+            else:
+                os.environ[key] = value
+
+    try:
+        # ── 🎬 media token: bot wahi banata hai jo website (server.js) padhti hai
+        token = make_media_token("@disha_batch", 4242, kind="v", size=1234, name="Solid State Part 1")
+        check("token prefix tg_", token.startswith("tg_"), token[:24])
+        token_body = token[3:]
+        check("token iv = 16 chars", len(token_body[:TOKEN_IV_CHARS]) == TOKEN_IV_CHARS)
+        check("token separators fixed", token_body[TOKEN_IV_CHARS] == "_" and token_body[TOKEN_IV_CHARS + 1 + TOKEN_TAG_CHARS] == "_")
+        back = read_media_token(token) or {}
+        check("token roundtrip chatId", back.get("chatId") == "@disha_batch", back)
+        check("token roundtrip messageId", back.get("messageId") == 4242, back)
+        check("token roundtrip kind+size", back.get("kind") == "v" and back.get("size") == 1234, back)
+        token_again = make_media_token("@disha_batch", 4242, kind="v", size=1, name="x")
+        check("deterministic iv (same chat+msg+kind)", token_again[3:][:TOKEN_IV_CHARS] == token_body[:TOKEN_IV_CHARS])
+        check("expired token rejected", read_media_token(make_media_token("@disha_batch", 7, ttl_days=-1)) is None)
+        never_expires = read_media_token(make_media_token("@disha_batch", 8, ttl_days=0)) or {}
+        check("ttl 0 = never expires", never_expires.get("exp") == 0 and bool(never_expires))
+        check("pdf token kind p", (read_media_token(make_media_token("-1001234", 9, kind="p")) or {}).get("kind") == "p")
+        check("tampered token rejected", read_media_token(token[:-4] + "AAAA") is None)
+        check("default token TTL = never expire (website jaisa)", token_ttl_days() == 0, token_ttl_days())
+        check("default minted token has exp 0", (read_media_token(token) or {}).get("exp") == 0)
+
+        # ── channel allowlist parsing
+        os.environ["BOT_SCAN_CHATS"] = "@disha_12th, -1001234567890 ; https://t.me/+AbCdEf12\n@another"
+        listed = scan_chats()
+        check("BOT_SCAN_CHATS splits on , ; space newline", len(listed) == 4, listed)
+        check("allowlist keeps raw specs", listed[0] == "@disha_12th" and listed[1] == "-1001234567890", listed)
+        os.environ["BOT_SCAN_CHATS"] = ""
+        check("empty BOT_SCAN_CHATS → []", scan_chats() == [])
+        check("chat_spec_key @handle", chat_spec_key("@DishaBatch") == "dishabatch")
+        check("chat_spec_key -100xxxx", chat_spec_key("-1001234567890") == "1234567890")
+        check("chat_spec_key post link", chat_spec_key("https://t.me/dishabatch/42") == "dishabatch")
+        check("chat_spec_key private link", chat_spec_key("https://t.me/c/1234567890/42") == "1234567890")
+        check("chat_id_from_link public", chat_id_from_link("https://t.me/disha/42") == "@disha")
+        check("chat_id_from_link private", chat_id_from_link("https://t.me/c/1234567890/42") == "-1001234567890")
+        check("invite hash", invite_hash("https://t.me/+AbCdEf12") == "AbCdEf12")
+        check("invite link has no chat id", chat_id_from_link("https://t.me/+AbCdEf12") == "")
+
+        class _FakeEntity:
+            def __init__(self, username: str, entity_id: int) -> None:
+                self.username = username
+                self.id = entity_id
+
+        check("allowlist empty → everything allowed", entity_in_specs(_FakeEntity("x", 5), set()) is True)
+        check("allowlist matches username", entity_in_specs(_FakeEntity("DishaBatch", 5), {"dishabatch"}) is True)
+        check("allowlist matches -100 id", entity_in_specs(_FakeEntity("", 1234567890), {"1234567890"}) is True)
+        check("allowlist blocks other channel", entity_in_specs(_FakeEntity("other", 99), {"1234567890"}) is False)
+
+        # ── node/message kind mapping
+        check("VIDEO node → video", node_media_kind("VIDEO") == "video")
+        check("FILE node → pdf", node_media_kind("FILE") == "pdf")
+        check("FOLDER node → skip", node_media_kind("FOLDER") == "")
+
+        class DocumentAttributeVideo:  # noqa: N801 — Telethon ke class-name se pehchan hoti hai
+            file_name = ""
+
+        class _FakeDoc:
+            def __init__(self, mime: str, attributes: list) -> None:
+                self.mime_type = mime
+                self.attributes = attributes
+
+        class _FakeMsg:
+            def __init__(self, video: Any = None, document: Any = None) -> None:
+                self.video = video
+                self.document = document
+                self.round = None
+                self.file = None
+
+        check("telegram video message → video", message_media_kind(_FakeMsg(video=object())) == "video")
+        check("video document → video", message_media_kind(_FakeMsg(document=_FakeDoc("video/mp4", []))) == "video")
+        check(
+            "video attribute (no mime) → video",
+            message_media_kind(_FakeMsg(document=_FakeDoc("", [DocumentAttributeVideo()]))) == "video",
+        )
+        check("pdf document → pdf", message_media_kind(_FakeMsg(document=_FakeDoc("application/pdf", []))) == "pdf")
+        check("photo-only message → skip", message_media_kind(_FakeMsg()) == "")
+
+        # ── 🇮🇳 Devanagari hardening
+        check("devanagari digits → ascii", "5" in normalize("भाग ५"), normalize("भाग ५"))
+        check("nukta normalizes", normalize("क़") == normalize("क"), (normalize("क़"), normalize("क")))
+        check("hindi part number parsed", extract_part_number("भाग ५") == 5, extract_part_number("भाग ५"))
+        check("hindi == english part after normalize", normalize("भाग ५") == normalize("part 5"), normalize("भाग ५"))
+
+        # ── course loader (real data/batches/*.json, bina Firebase ke)
+        os.environ.pop("BOT_DATA_DIR", None)
+        course_nodes = load_course_nodes(None)
+        check("course nodes loaded from data/batches", len(course_nodes) > 20, len(course_nodes))
+        check("only video/pdf nodes (no folders)", all(n["kind"] in ("video", "pdf") for n in course_nodes))
+        check("every node carries its course name", all(n["batchName"] for n in course_nodes))
+        check("node titles precomputed for prefilter", any(n["_tokens"] for n in course_nodes))
+        check("significant tokens precomputed", any(n["_sig"] for n in course_nodes))
+        check("nothing attached yet", all(not n["hasToken"] for n in course_nodes))
+        check("batch filter works", len(load_course_nodes(None, batch_id="57")) < len(course_nodes))
+
+        # ── overlay merge (server.js:mergeOverlay ka port) — JSON file safe
+        base_tree = [{"id": "A", "title": "Folder", "children": [{"id": "A1", "title": "Lec 1", "type": "VIDEO"}]}]
+        merged = merge_overlay(json.loads(json.dumps(base_tree)), [{"id": "A1", "tg_video_token": "tg_x", "source": "telegram_scan"}])
+        check("overlay attaches token to existing node", merged[0]["children"][0]["tg_video_token"] == "tg_x", merged)
+        check("overlay keeps node title", merged[0]["children"][0]["title"] == "Lec 1")
+        check("base file tree untouched", "tg_video_token" not in base_tree[0]["children"][0])
+        merged2 = merge_overlay(json.loads(json.dumps(merged)), [{"id": "A2", "title": "New", "parent_id": "A", "tg_pdf_token": "tg_y"}])
+        check("new overlay node lands under parent", any(c.get("id") == "A2" for c in merged2[0]["children"]), merged2)
+        merged3 = merge_overlay(json.loads(json.dumps(merged2)), [{"id": "A1", "tg_video_token": "tg_z"}])
+        check("re-scan overwrites token", merged3[0]["children"][0]["tg_video_token"] == "tg_z")
+        check("re-scan keeps other nodes", any(c.get("tg_pdf_token") == "tg_y" for c in merged3[0]["children"]))
+
+        # ── patch shape (admin "Add by URL" jaisa hi)
+        video_node = {"batchId": "57", "batchName": "12th Science", "nodeId": "A1", "title": "Solid State Part 1", "kind": "video"}
+        patch = build_node_patch(video_node, "@disha", 42, size=1000, name="Solid State", channel_kind="public", score=91.2)
+        check("video patch → tg_video_token", bool(patch.get("tg_video_token")) and "tg_pdf_token" not in patch, patch)
+        check("patch source = telegram_scan", patch["source"] == "telegram_scan")
+        check("patch meta link (public)", patch["tg_meta"]["link"] == "https://t.me/disha/42", patch["tg_meta"])
+        check("patch meta keeps score", patch["tg_meta"]["score"] == 91.2)
+        check("patch token readable by website", (read_media_token(patch["tg_video_token"]) or {}).get("messageId") == 42)
+        pdf_node = dict(video_node, kind="pdf", nodeId="A2")
+        pdf_patch = build_node_patch(pdf_node, "-1001234567890", 9, channel_kind="private", score=80)
+        check("pdf patch → tg_pdf_token", bool(pdf_patch.get("tg_pdf_token")) and "tg_video_token" not in pdf_patch)
+        check("patch meta link (private)", pdf_patch["tg_meta"]["link"] == "https://t.me/c/1234567890/9", pdf_patch["tg_meta"])
+
+        # ── assignment rules: best per lecture + ek message ek hi lecture ko
+        pairs = [
+            {"node": video_node, "score": 91.0, "chatId": "@a", "messageId": 1},
+            {"node": video_node, "score": 82.0, "chatId": "@b", "messageId": 2},
+            {"node": pdf_node, "score": 88.0, "chatId": "@a", "messageId": 1},
+            {"node": dict(video_node, nodeId="A3"), "score": 70.0, "chatId": "@c", "messageId": 3},
+        ]
+        assigned, dropped = assign_matches(pairs, 75.0)
+        check("best score wins per lecture", len(assigned) == 1 and abs(assigned[0]["score"] - 91.0) < 0.01, assigned)
+        check("one message → one lecture only", len({(a["chatId"], a["messageId"]) for a in assigned}) == len(assigned))
+        check("below-threshold pair skipped", all(abs(a["score"] - 70.0) > 0.01 for a in assigned))
+        check("losers reported as dropped", len(dropped) >= 1, dropped)
+
+        # ── prefilter (speed) — score wahi, candidates kam
+        def _pool(title: str, node_id: str, has_token: bool = False) -> Dict[str, Any]:
+            norm = normalize(title)
+            return {
+                "batchId": "57", "batchName": "12th Science", "nodeId": node_id, "title": title,
+                "topic": "", "kind": "video", "hasToken": has_token,
+                "_tokens": set(tokenize(norm)), "_sig": significant_tokens(title),
+                "_bigrams": _char_bigrams(norm),
+            }
+
+        cand = {"parsed": {"title": "Solid State Part 1", "topic": "Chemistry"}, "file_name": "", "caption": ""}
+        pool = [
+            _pool("Solid State Part 1", "n1"),
+            _pool("जीव विज्ञान भाग ५", "n2"),
+            _pool("Solid State Part 1 old", "n3", True),
+            _pool("Electrochemical Cells Part 2", "n4"),
+        ]
+        short = shortlist_nodes(pool, cand)
+        check("prefilter keeps matching lecture", any(n["nodeId"] == "n1" for n in short), short)
+        check("prefilter drops unrelated lecture", all(n["nodeId"] != "n2" for n in short), short)
+        check("prefilter skips already-attached", all(not n["hasToken"] for n in short), short)
+        check(
+            "prefilter keeps spelling variant (bigram dice)",
+            any(n["nodeId"] == "n4" for n in shortlist_nodes(pool, {"parsed": {"title": "Electrochemistry Cells"}, "file_name": "", "caption": ""})),
+        )
+        check("prefiltered node scores above threshold", score_candidate(scan_request(short[0]), cand)["score"] >= scan_min_score())
+        check("part-number guard still rejects wrong part", score_candidate(scan_request(_pool("Solid State Part 4", "n9")), cand)["score"] == 0.0)
+
+        # ── scan config knobs
+        os.environ["BOT_SCAN_MIN_SCORE"] = "88"
+        check("BOT_SCAN_MIN_SCORE respected", scan_min_score() == 88.0)
+        os.environ["BOT_SCAN_MIN_SCORE"] = "10"
+        check("min score never below delivery threshold", scan_min_score() == MATCH_THRESHOLD)
+        os.environ.pop("BOT_SCAN_MIN_SCORE", None)
+        check("default min score 75", scan_min_score() == 75.0)
+        os.environ["BOT_SCAN_MESSAGE_LIMIT"] = "900"
+        check("BOT_SCAN_MESSAGE_LIMIT respected", scan_message_limit() == 900)
+        os.environ.pop("BOT_SCAN_MESSAGE_LIMIT", None)
+        check("default message limit 400", scan_message_limit() == 400)
+        check("summary text is english", "Auto-scan finished" in scan_summary_text({"chats": [], "attached": 0}))
+
+        # ── 🧪 POORA PIPELINE (offline): channel message → course node par token
+        #    Nakli Telegram client + sqlite store se wahi code chalta hai jo
+        #    Render par chalega — sirf network nahi hota.
+        print("\n── 🧲 auto-scan pipeline (fake channel → attach) ───────────────")
+        video_nodes = [n for n in course_nodes if n["kind"] == "video" and len(n["title"]) > 12]
+        target = video_nodes[0]
+        pdf_nodes = [
+            n for n in course_nodes
+            if n["kind"] == "pdf" and n["batchId"] == target["batchId"] and len(n["title"]) > 8
+        ]
+        pdf_target = pdf_nodes[0] if pdf_nodes else None
+
+        class _FakeMedia:
+            def __init__(self, size: int = 5 * 1024 * 1024, duration: int = 1800, mime: str = "video/mp4") -> None:
+                self.size = size
+                self.duration = duration
+                self.mime_type = mime
+                self.attributes = []
+                self.file_name = ""
+
+        class _FakeChat:
+            def __init__(self, title: str, chat_id: int) -> None:
+                self.title = title
+                self.id = chat_id
+                self.username = ""
+                self.noforwards = False
+
+        class _FakePeer:
+            def __init__(self, channel_id: int) -> None:
+                self.channel_id = channel_id
+
+        class _FakeFile:
+            def __init__(self, name: str) -> None:
+                self.name = name
+
+        class _FakeMessage:
+            def __init__(self, msg_id: int, caption: str, name: str, chat: Any, is_video: bool = True) -> None:
+                self.id = msg_id
+                self.message = caption
+                self.video = _FakeMedia() if is_video else None
+                self.document = None if is_video else _FakeMedia(mime="application/pdf")
+                self.round = None
+                self.file = _FakeFile(name)
+                self.chat = chat
+                self.peer_id = _FakePeer(chat.id)
+                self.media = self.video or self.document
+
+        class _FakeEntity:
+            def __init__(self, title: str, entity_id: int) -> None:
+                self.title = title
+                self.id = entity_id
+                self.username = ""
+
+        class _FakeUser:
+            def __init__(self, entity: Any, messages: list) -> None:
+                self._entity = entity
+                self._messages = messages
+
+            async def get_entity(self, spec: Any) -> Any:
+                return self._entity
+
+            async def iter_messages(self, entity: Any, limit: int = 0, **kwargs: Any) -> Any:
+                for row in self._messages[: int(limit or len(self._messages))]:
+                    yield row
+
+        fake_chat = _FakeChat(target["batchName"], 1234567890)
+        fake_messages = [
+            _FakeMessage(
+                901,
+                "Title: %s\nCourse: %s" % (target["title"], target["batchName"]),
+                "%s.mp4" % target["title"][:40],
+                fake_chat,
+            ),
+            _FakeMessage(902, "Random birthday party clip 2019", "party.mp4", fake_chat),
+        ]
+        if pdf_target is not None:
+            fake_messages.append(
+                _FakeMessage(
+                    903,
+                    "Title: %s\nCourse: %s" % (pdf_target["title"], pdf_target["batchName"]),
+                    "%s.pdf" % pdf_target["title"][:40],
+                    fake_chat,
+                    is_video=False,
+                )
+            )
+
+        stub = object.__new__(DeliveryBot)
+        stub.cfg = dict(DEFAULT_CONFIG)
+        stub.started_at = time.time()
+        stub.user = _FakeUser(_FakeEntity(fake_chat.title, fake_chat.id), fake_messages)
+        with tempfile.TemporaryDirectory() as scan_tmp:
+            scan_store = SqliteStoreForTest(os.path.join(scan_tmp, "scan.db"))
+            stub.store = scan_store
+            scan_result = asyncio.run(stub.scan_and_attach(chats=["-1001234567890"], batch_id=target["batchId"]))
+            check("scan reports ok", scan_result["ok"] is True, scan_result.get("errors"))
+            check("scan read the fake messages", scan_result["messages"] == len(fake_messages), scan_result["messages"])
+            check("scan counted media only", scan_result["media"] == len(fake_messages), scan_result["media"])
+            check("scan matched the right lecture", scan_result["matched"] >= 1, scan_result)
+            check("scan attached a link", scan_result["attached"] >= 1, scan_result["attached"])
+            check("unmatched clip did not attach", scan_result["unmatched"] >= 0)
+            check("scan duration recorded", scan_result["durationSec"] >= 0)
+
+            saved = scan_store.get("%s/%s" % (CUSTOM_BATCH_PATH, target["batchId"])) or {}
+            flat_after = flatten_nodes(saved.get("tree") or [])
+            hit = next((n for n in flat_after if n["id"] == target["nodeId"]), None)
+            check("overlay written to custom_batches", bool(hit and hit.get("tg_video_token")), flat_after[:2])
+            token_back = read_media_token(str((hit or {}).get("tg_video_token") or "")) or {}
+            check("attached token points at the message", token_back.get("messageId") == 901, token_back)
+            check("attached token points at the channel", token_back.get("chatId") == "-1001234567890", token_back)
+            check("overlay is minimal (only changed node)", len(flat_after) == scan_result["attached"], len(flat_after))
+
+            group_row = scan_store.children(GROUPS_PATH) or {}
+            check("channel registry written", len(group_row) == 1, group_row)
+            only_group = list(group_row.values())[0] if group_row else {}
+            check("registry has lastScanAt", int(only_group.get("lastScanAt") or 0) > 0, only_group)
+            check("registry has attached count", int(only_group.get("attached") or 0) >= 1, only_group)
+            check("bot_state/scan report written", int((scan_store.get("%s/scan" % STATE_PREFIX) or {}).get("lastAt") or 0) > 0)
+
+            # 🔁 dobara scan = idempotent (attached node skip, token badalta nahi)
+            token_before = str((hit or {}).get("tg_video_token"))
+            second = asyncio.run(stub.scan_and_attach(chats=["-1001234567890"], batch_id=target["batchId"]))
+            check("re-scan skips attached lectures", second["skippedAlready"] >= 1, second)
+            check("re-scan attaches nothing new", second["attached"] == 0, second["attached"])
+            saved2 = scan_store.get("%s/%s" % (CUSTOM_BATCH_PATH, target["batchId"])) or {}
+            hit2 = next((n for n in flatten_nodes(saved2.get("tree") or []) if n["id"] == target["nodeId"]), None)
+            check("re-scan keeps the same token", str((hit2 or {}).get("tg_video_token")) == token_before)
+
+            # 🌐 website ab isi node ko "hasTelegram" maanegi
+            now_nodes = load_course_nodes(scan_store, batch_id=target["batchId"])
+            same = next((n for n in now_nodes if n["nodeId"] == target["nodeId"]), None)
+            check("website view: node now has a link", bool(same and same["hasToken"]), same)
+
+            # ⛔ galat channel allowlist par scan kuch nahi karta
+            third = asyncio.run(stub.scan_and_attach(chats=[], batch_id=target["batchId"]))
+            check("no channels configured → clear error", third["ok"] is False and bool(third["errors"]), third)
+            scan_store.close()
+
+    finally:
+        _restore_scan_env()
+
     os.environ.pop("ADMIN_SESSION_SECRET", None)
     check("no secret → no key (dev only)", vault_key() is None or master_secret() == "shd_local_dev_master_key_v3")
 
@@ -4107,6 +5541,10 @@ def bot_health_status() -> Dict[str, Any]:
                 "userSessionConnected": bool(
                     getattr(bot, "user", None) is not None and getattr(bot, "_me_id", 0)
                 ),
+                # 🧲 last auto-scan report (attached/matched/chats/errors)
+                "lastScan": dict(RUNTIME_STATUS.get("lastScan") or {}),
+                "scanChannels": len(scan_chats()),
+                "scanMinScore": scan_min_score(),
             }
         )
     return info

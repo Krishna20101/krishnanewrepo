@@ -43,7 +43,7 @@ site/                   website ka saara js/css (koi sub-folder nahi)
   admin.js              admin panel (8 tabs)
 
 bot/                    Telegram bot (sirf 2 files)
-  bot.py                vault + store + matcher + health + bot — ek file
+  bot.py                vault + store + matcher + 🧲 auto-scanner + health + bot — ek file
   requirements.txt      telethon, firebase-admin deps, cryptography
 
 data/batches/*.json     real course data — READ ONLY (kabhi modify nahi hota)
@@ -101,6 +101,58 @@ Sirf wahi compare hota hai jo caption me **actually likha** hai:
 - Part guard: Part 1 kabhi Part 2 se match nahi karta
 - Same naam kai groups me → **sabse zyada score wala group** jeet-ta hai
 
+### 🧲 Auto-scan — "link site me kaun bharta hai?"
+
+| Kaam | Kaun karta hai | Kab |
+| --- | --- | --- |
+| **Channel padhna (scan)** | 🤖 bot (`bot/bot.py`, USER session) | Admin → Telegram → **🧲 Start auto-scan**, ya bot ko `/scan` |
+| **Match karna** | 🤖 bot | usi scan me — har media message vs `data/batches/*.json` ka har lecture |
+| **URL/link site me bharna** | 🤖 bot khud (auto-scan) **ya** 🧑 admin (Explorer → Add by URL) | scan khatam hote hi Firebase overlay me token |
+| **Video bhejna** | 🤖 bot | student ▶ → deep link → bot |
+
+**Kaun se channels padhe jaate hain?** sirf `BOT_SCAN_CHATS` (Render → **bot** service
+ka env). 10-15 ids comma/space separated — `@handle`, `-100xxxxxxxxxx`, ya invite link:
+
+```
+BOT_SCAN_CHATS=@disha_12th, -1001234567890, https://t.me/+AbCdEf
+```
+
+> Yahi list **delivery-search ko bhi limit** karti hai: student ki request par bot
+> poore Telegram account ke dialogs nahi kholta, sirf inhi channels me dhoondhta hai
+> (galat channel ki video match hone ka chance khatam + search fast).
+
+**Match kaise hota hai** (wahi matcher jo delivery me chalta hai, threshold sirf zyada):
+
+- lecture ka **title** (50-68%) + **folder/topic path** (18%) + **course ka naam** (32%)
+- attach hone ke liye score ≥ `BOT_SCAN_MIN_SCORE` (default **75**; delivery threshold 60)
+- **part guard** — `Part 3` kabhi `Part 4` se match nahi karta
+- **course guard** — `12th मंजिल` vs `11th परिवर्तन` → reject (generic folder naam par nahi)
+- 🇮🇳 **Devanagari** — `भाग ५` == `Part 5`, `क़` == `क` (digits + nukta normalize hote hain)
+- VIDEO node par video hi attach hota hai, FILE/PDF node par document hi
+- har channel ke `BOT_SCAN_MESSAGE_LIMIT` (default 400) recent messages padhe jaate hain
+
+**Kya likha jaata hai:** admin ke "Add by URL" jaisa hi **minimal overlay** —
+`custom_batches/<batchId>.tree` me sirf `{id, tg_video_token|tg_pdf_token, tg_meta,
+source: "telegram_scan"}`. `data/batches/*.json` **kabhi modify nahi hoti** aur naya
+lecture node **kabhi nahi banta** (jo JSON me nahi hai, wo attach nahi hota).
+
+**Ek message = ek lecture.** Same video do lectures par na chali jaaye, isliye sabse
+high score wala lecture jeet-ta hai; baaki unmatched count report me dikhta hai.
+
+**Idempotent.** Dobara scan par pehle se attached lectures skip hote hain aur token
+bilkul wahi rehta hai (deterministic IV) — students ke purane deep links zinda rehte hain.
+
+**Scan ke baad student ▶ dabata hai** → request record me `chatId + messageId` pehle se
+hota hai → bot ko **direct hit** milta hai (channel dobara search nahi hota) → video turant.
+
+**Report kahan:** Admin → Telegram tab me *Scanned channels* (media / attached / bina link /
+last scan) + *Scan tasks* (status aur `attached=… matched=… unmatched=…`); bot ke
+`/healthz` me `lastScan`; Render logs me `🧲 scan done in …`.
+
+> ⚠️ Bot aur website me `ADMIN_SESSION_SECRET` **bilkul same** hona chahiye — warna
+> bot ka banaya token website decrypt nahi kar payegi aur attach hoga hi nahi.
+> Token lifetime default **0 = kabhi expire nahi** (`TG_MEDIA_TOKEN_TTL_DAYS`, dono side same).
+
 ---
 
 ## 3 · Local run
@@ -145,11 +197,35 @@ par chalta hai — testing ke liye theek, production ke liye nahi.
 bot decrypt nahi kar payega.
 
 Bot: `TELEGRAM_API_ID`, `TELEGRAM_API_HASH`, `TELEGRAM_BOT_TOKEN`, `TG_SESSION_STRING`
-(**USER session — private channels se download isi se hota hai**), `FIREBASE_*`, `OWNER_TG_ID`.
-Site: `FIREBASE_*`, `ADMIN_EMAIL`, `ADMIN_PASSWORD`, `TELEGRAM_BOT_USERNAME`.
+(**USER session — private channels se download isi se hota hai**), `FIREBASE_*`, `OWNER_TG_ID`,
+aur 🧲 **`BOT_SCAN_CHATS`** (kaun se channels scan/search karne hain — 10-15 ids, comma
+separated) + optional `BOT_SCAN_MIN_SCORE=75`, `BOT_SCAN_MESSAGE_LIMIT=400`,
+`TG_MEDIA_TOKEN_TTL_DAYS=0`.
+Site: `FIREBASE_*`, `ADMIN_EMAIL`, `ADMIN_PASSWORD`, `TELEGRAM_BOT_USERNAME`
+(+ `TG_MEDIA_TOKEN_TTL_DAYS=0` — bot wali same value).
 
 > ⚠️ Website ko ab `TELEGRAM_API_ID/API_HASH/SESSION_STRING` ki zaroorat **nahi** —
-> scanning aur delivery sirf bot karta hai.
+> scanning aur delivery sirf bot karta hai. **Vercel me session kabhi mat daliye.**
+
+**🔑 Bot credentials kis order me uthte hain** (`resolve_credentials`):
+
+1. **env vars** — `TG_SESSION_STRING`, `TELEGRAM_API_ID`, `TELEGRAM_API_HASH`, `TELEGRAM_BOT_TOKEN`
+2. **Firebase vault** — `telegram_vault/encrypted_creds` (encrypted; `ADMIN_SESSION_SECRET`
+   se khulta hai). Purane website-panel se save kiye apiId/apiHash/botToken/sessionString
+   yahin pade hain → Render me Telegram secrets na bhi do to bot vault se utha lega.
+3. **interactive** — kuch missing ho to bot saaf likh deta hai kya chahiye.
+
+Startup par log me dikhta hai kaunsa source use hua:
+`user session : env:TG_SESSION_STRING` ya `vault (telethon format)` ya
+`vault (converted from GramJS)`.
+
+> ⚠️ Purani vault wali session **GramJS** format me hai — bot use Telethon me convert
+> karta hai (best-effort). Sabse saaf rasta: ek baar `python bot/bot.py --login`
+> chala kar **nayi Telethon session** banaiye aur wahi `TG_SESSION_STRING` me daliye.
+>
+> ⚠️ **EK session = EK process.** Jo bhi session chale, wo sirf Render ke ek instance
+> me chale (numInstances: 1) aur koi purana runner/band deployment use use na kar
+> raha ho — warna Telegram `406 AUTH_KEY_DUPLICATED` de kar session terminate kar deta hai.
 
 ### 4b · Vercel (agar purana domain wahin hai)
 
@@ -165,10 +241,51 @@ wrapper jo wahi Express app ko serverless function ke roop me export karta hai).
 - **Raw files protected**: `/data/*`, `/server.js`, `/bot/*`, `package*.json`,
   `render.yaml`, `database.rules.json` → rewrite se 403 (`api/deny.js`).
 - Dashboard me framework: **Other / None** (koi build command zaroori nahi).
+  (Settings → General → Framework Preset = **Other**; Build Command khali chhodiye —
+  Vercel function ke dependencies khud install kar leta hai.)
+
+**Secrets checklist (Vercel):**
+
+| Status | Variable |
+| --- | --- |
+| ✅ zaroori (8) | `FIREBASE_PROJECT_ID` `FIREBASE_CLIENT_EMAIL` `FIREBASE_PRIVATE_KEY` `FIREBASE_DATABASE_URL` `ADMIN_SESSION_SECRET` `ADMIN_EMAIL` `ADMIN_PASSWORD` |
+| ➕ add karo (1) | `TELEGRAM_BOT_USERNAME` (bina `@` ke; na do to site bot online hote hi `bot_state/config` se khud utha leti hai) |
+| 🗑 delete karo | `NEXT_PUBLIC_SITE_URL`, `TELEGRAM_JOIN_URL`, koi bhi `NEXT_PUBLIC_*`, `TELEGRAM_API_ID`, `TELEGRAM_API_HASH`, `TELEGRAM_SESSION_STRING`/`TG_SESSION_STRING`, `CLOUDFLARE_STREAM_WORKER_URL` — website ko inki zaroorat nahi, rakhna sirf leak hai |
+| ⚙️ optional | `TG_MEDIA_TOKEN_TTL_DAYS=30`, `CORS_ALLOWED_ORIGINS` |
+
+> Env badalne ke baad **Redeploy** zaroori hai — purani deployment purane values par
+> chalti rehti hai (Vercel env list me ⚠️ isi ka ishara hota hai). `FIREBASE_PRIVATE_KEY`
+> ek baar khol kar dekh lijiye: poora key ho (`-----BEGIN PRIVATE KEY-----` se shuru,
+> `-----END PRIVATE KEY-----` tak; newlines `\n` likhe hon to bhi chalega).
 
 > Bot **hamesha Render par** chalega (Vercel par 24×7 daemon possible nahi). Site
 > Vercel par ho ya Render par — dono ek hi Firebase RTDB se judte hain, isliye
 > `ADMIN_SESSION_SECRET` har jagah **same** rakhiye.
+
+### 4c · 🔥 Firebase rules publish karna
+
+Website aur bot **dono Firebase Admin SDK** use karte hain — Admin SDK rules se
+parhai hoti hai. Browser/app se koi direct RTDB access nahi hai, isliye rules
+**poora lock** rehte hain (repo me `database.rules.json` bhi yahi hai):
+
+```json
+{
+  "rules": {
+    ".read": false,
+    ".write": false
+  }
+}
+```
+
+Publish kaise karein:
+1. Firebase Console → **Realtime Database** → **Rules** tab
+2. Upar wala JSON paste karo → **Publish**
+   (ya CLI se: `firebase deploy --only database`)
+3. Bas — iske baad koi bhi client-side read/write reject hogi; site aur bot
+   (Admin SDK) bina ruke chalte rahenge.
+
+> Agar kabhi rules me kholna pade to sirf server ke through kholein (naya API route),
+> rules me `.read: true` **kabhi mat** kijiye — course data login ke peeche hai.
 
 ---
 
@@ -179,7 +296,7 @@ wrapper jo wahi Express app ko serverless function ke roop me export karta hai).
 | **Overview** | courses, videos, requests (aaj ke), students, bot heartbeat |
 | **Courses** | naya DB-only course, edit (name/thumb/price/hidden), hide/delete |
 | **Explorer** | course ka tree → har lecture par **Add by URL** (Telegram post link) |
-| **Telegram** | group scan task, registered groups, delivery requests, **purge danger-zone** |
+| **Telegram** | 🧲 **auto-scan** (channel → links attach), scanned channels, scan tasks, delivery requests, **purge danger-zone** |
 | **Bot** | daily limit, IST reset hour, auto-delete, delivery mode, join-gate, pause, users |
 | **Settings** | app name, telegram URLs, credit/contact, limits, maintenance mode |
 | **Accounts** | student create/disable/delete + password reset |
@@ -190,6 +307,12 @@ wrapper jo wahi Express app ko serverless function ke roop me export karta hai).
 1. link validate hota hai (public/private pehchaan ke saath)
 2. chatId + messageId **encrypt** hoke node par attach (`tg_video_token`)
 3. delivery automatically decide hoti hai — public → forward, private → download+upload
+
+**🧲 Auto-scan** isi ka bulk version hai — ek channel paste karne ki jagah bot poora
+channel padh kar saare matching lectures par link khud attach kar deta hai. Telegram
+tab me teeno field khaali chhod kar button dabaiye → bot `BOT_SCAN_CHATS` (env) wale
+saare channels scan karega; ek channel/course dena ho to wahi field bhar dijiye.
+Nateeja *Scanned channels* + *Scan tasks* me dikhta hai (details: §2 · Auto-scan).
 
 **Purge (danger zone)** — sirf Telegram-sourced additions:
 `stripLinks` (default), `deleteTelegramNodes`, `deleteTelegramCourses`,
@@ -224,10 +347,11 @@ jaati hai, aur TTL 168 ghante.
 
 ```bash
 # server: crypto, post-link parsing, IST quota window, overlay merge, sessions
-node server.js --selftest        # 51 checks
+node server.js --selftest        # 53 checks
 
-# bot: vault, quota, delivery-mode, matcher rules, join-gate, health server
-.venv-bot/bin/python bot/bot.py --selftest   # 91 checks
+# bot: vault, media-token, quota, delivery-mode, matcher rules, 🧲 auto-scan
+#      (course loader + overlay + poora pipeline nakli channel ke saath), join-gate, health
+.venv-bot/bin/python bot/bot.py --selftest   # 192 checks
 ```
 
 Dono self-test **bina Telegram/Firebase credentials ke** chalte hain — pure offline

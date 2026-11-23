@@ -61,6 +61,7 @@ function envBool(key, fallback = false) {
 
 function envNum(key, fallback) {
   const raw = env(key, "");
+  if (!raw) return fallback; // ⚠️ Number("") === 0 hota hai — fallback zaroori tha
   const value = Number(raw);
   return Number.isFinite(value) ? value : fallback;
 }
@@ -121,7 +122,11 @@ function studentSessionSecret() {
 
 const VAULT_SALT = Buffer.from("shd_tg_media_vault_v3_2026", "utf8");
 const SESSION_SALT = "shd_session_salt";
-const TOKEN_TTL_DAYS = envNum("TG_MEDIA_TOKEN_TTL_DAYS", 30);
+// 🔗 Media token lifetime: 0 = kabhi expire nahi (default).
+//    Scan/admin se attach hua link ek FIXED Telegram message ko point karta hai,
+//    isliye 30 din baad "link is not valid any more" dikhana galat hai. Rotation
+//    chahiye ho to TG_MEDIA_TOKEN_TTL_DAYS=30 set kar dijiye.
+const TOKEN_TTL_DAYS = envNum("TG_MEDIA_TOKEN_TTL_DAYS", 0);
 
 let cachedVaultKey = null;
 function vaultKey() {
@@ -1706,13 +1711,15 @@ app.post("/api/admin/telegram/attach", requireAdmin, async (req, res) => {
 
 /* ── 🤖 bot state/config/tasks ─────────────────────────────────────────── */
 app.get("/api/admin/bot", requireAdmin, async (req, res) => {
-  const [cfg, heartbeat, users, stats, requests, groups] = await Promise.all([
+  const [cfg, heartbeat, users, stats, requests, groups, tasks, scan] = await Promise.all([
     getBotConfig(),
     store.get("bot_state/heartbeat"),
     store.get("bot_state/users"),
     store.get("bot_state/stats"),
     store.get(REQUESTS_PATH),
     store.get(GROUPS_PATH),
+    store.get(BOT_TASKS_PATH),
+    store.get("bot_state/scan"),
   ]);
   const safeUsers = Object.entries(users && typeof users === "object" ? users : {}).map(([id, u]) => ({
     id,
@@ -1744,8 +1751,41 @@ app.get("/api/admin/bot", requireAdmin, async (req, res) => {
       title: (g && g.title) || "",
       chatId: String((g && g.chatId) || ""),
       items: Number((g && g.itemCount) || 0),
+      messages: Number((g && g.messages) || 0),
+      attached: Number((g && g.attached) || (g && g.matched) || 0),
+      unmatched: Number((g && g.unmatched) || 0),
+      threshold: Number((g && g.threshold) || 0),
+      lastError: String((g && g.lastError) || ""),
       lastScanAt: Number((g && g.lastScanAt) || 0),
     })),
+    // 🧲 bot ka last auto-scan report (bot likhta hai bot_state/scan par)
+    scan: scan && typeof scan === "object"
+      ? {
+          channels: Number(scan.channels || 0),
+          minScore: Number(scan.minScore || 0),
+          messageLimit: Number(scan.messageLimit || 0),
+          attached: Number(scan.attached || 0),
+          matched: Number(scan.matched || 0),
+          unmatched: Number(scan.unmatched || 0),
+          durationSec: Number(scan.durationSec || 0),
+          errors: Number(scan.errors || 0),
+          lastAt: Number(scan.lastAt || 0),
+        }
+      : null,
+    // admin panel se queue kiye gaye scan tasks (status/result bot bharta hai)
+    tasks: Object.entries(tasks && typeof tasks === "object" ? tasks : {})
+      .map(([key, t]) => ({
+        id: String((t && t.id) || key),
+        type: String((t && t.type) || ""),
+        status: String((t && t.status) || ""),
+        result: String((t && t.result) || ""),
+        target: String((t && (t.chatId || t.invite)) || ""),
+        batchId: String((t && t.batchId) || ""),
+        createdAt: Number((t && t.createdAt) || 0),
+        doneAt: Number((t && t.doneAt) || 0),
+      }))
+      .sort((a, b) => b.createdAt - a.createdAt)
+      .slice(0, 20),
   });
 });
 
@@ -1786,18 +1826,22 @@ app.put("/api/admin/bot/config", requireAdmin, async (req, res) => {
 app.post("/api/admin/bot/tasks", requireAdmin, async (req, res) => {
   const body = req.body || {};
   const type = String(body.type || "scan_group");
-  if (type !== "scan_group") return fail(res, 400, "BAD_TASK", "Only scan_group tasks are supported.");
+  if (!["scan_group", "scan", "auto_scan"].includes(type)) {
+    return fail(res, 400, "BAD_TASK", "Only scan_group tasks are supported.");
+  }
   const invite = String(body.invite || "").trim();
   const chatId = String(body.chatId || "").trim();
   const channelRegex = /^(@[A-Za-z][A-Za-z0-9_]{3,31}|-?\d{4,20})$/;
   const inviteRegex = /^https:\/\/(t\.me|telegram\.me|telegram\.dog)\/[A-Za-z0-9_+/=-]{2,80}$/;
-  if (!inviteRegex.test(invite) && !channelRegex.test(chatId)) {
+  // 🧲 Dono khaali = bot apni env list (BOT_SCAN_CHATS) ke saare channels scan karega.
+  //    Kuch diya ho to wahi ek channel scan hota hai.
+  if ((invite || chatId) && !inviteRegex.test(invite) && !channelRegex.test(chatId)) {
     return fail(res, 400, "BAD_SOURCE", "Provide a valid invite link (https://t.me/+xxxx) or channel id (@name / -100xxxx).");
   }
   const id = `task_${Date.now().toString(36)}_${crypto.randomBytes(3).toString("hex")}`;
   await store.set(`${BOT_TASKS_PATH}/${id}`, {
     id,
-    type,
+    type: "scan_group",
     invite: invite || undefined,
     chatId: chatId || undefined,
     batchId: String(body.batchId || "") || undefined,
@@ -1805,8 +1849,15 @@ app.post("/api/admin/bot/tasks", requireAdmin, async (req, res) => {
     createdAt: Date.now(),
     createdBy: "admin_panel",
   });
-  await writeLog("bot_task", { id, type, chatId, invite: invite ? "set" : "" });
-  json(res, 200, { ok: true, taskId: id, message: "Task queued. The bot will pick it up when it is online." });
+  await writeLog("bot_task", { id, type: "scan_group", chatId, invite: invite ? "set" : "" });
+  return json(res, 200, {
+    ok: true,
+    taskId: id,
+    scope: chatId || invite || "BOT_SCAN_CHATS (env list)",
+    message: chatId || invite
+      ? "Task queued. The bot will scan this channel and attach matched lectures when it is online."
+      : "Task queued. The bot will scan every channel in BOT_SCAN_CHATS and attach matched lectures when it is online.",
+  });
 });
 
 /* ── 👥 student accounts ───────────────────────────────────────────────── */
@@ -2238,6 +2289,21 @@ function selfTest() {
   const neverExpires = makeMediaToken({ chatId: "@x", messageId: 10, ttlDays: 0 });
   check("ttlDays 0 = never expires", readMediaToken(neverExpires) !== null);
   check("garbage token rejected", readMediaToken("tg_a_b_c") === null && readMediaToken("") === null);
+  // 🔗 default TTL (TG_MEDIA_TOKEN_TTL_DAYS unset) = never expire — bot ka
+  //    auto-scan bhi yahi default use karta hai, warna 30 din baad saare
+  //    attached links "not valid any more" bolne lagte.
+  const defaultToken = makeMediaToken({ chatId: "@x", messageId: 11, kind: "v" });
+  const defaultRead = readMediaToken(defaultToken);
+  check(
+    "default token never expires (bot + website same policy)",
+    Boolean(defaultRead) && defaultRead.exp === 0,
+    defaultRead
+  );
+  check(
+    "envNum falls back when the var is unset",
+    envNum("TG_MEDIA_TOKEN_TTL_DAYS", 0) === TOKEN_TTL_DAYS && envNum("__SHD_UNSET_VAR__", 42) === 42,
+    envNum("__SHD_UNSET_VAR__", 42)
+  );
 
   console.log("\n── 🔗 Telegram post link parsing ─────────────────────────────");
   const pub = parseTelegramPostLink("https://t.me/physicswallah/123456");
