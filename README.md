@@ -165,10 +165,51 @@ wrapper jo wahi Express app ko serverless function ke roop me export karta hai).
 - **Raw files protected**: `/data/*`, `/server.js`, `/bot/*`, `package*.json`,
   `render.yaml`, `database.rules.json` → rewrite se 403 (`api/deny.js`).
 - Dashboard me framework: **Other / None** (koi build command zaroori nahi).
+  (Settings → General → Framework Preset = **Other**; Build Command khali chhodiye —
+  Vercel function ke dependencies khud install kar leta hai.)
+
+**Secrets checklist (Vercel):**
+
+| Status | Variable |
+| --- | --- |
+| ✅ zaroori (8) | `FIREBASE_PROJECT_ID` `FIREBASE_CLIENT_EMAIL` `FIREBASE_PRIVATE_KEY` `FIREBASE_DATABASE_URL` `ADMIN_SESSION_SECRET` `ADMIN_EMAIL` `ADMIN_PASSWORD` |
+| ➕ add karo (1) | `TELEGRAM_BOT_USERNAME` (bina `@` ke; na do to site bot online hote hi `bot_state/config` se khud utha leti hai) |
+| 🗑 delete karo | `NEXT_PUBLIC_SITE_URL`, `TELEGRAM_JOIN_URL`, koi bhi `NEXT_PUBLIC_*`, `TELEGRAM_API_ID`, `TELEGRAM_API_HASH`, `TELEGRAM_SESSION_STRING`/`TG_SESSION_STRING`, `CLOUDFLARE_STREAM_WORKER_URL` — website ko inki zaroorat nahi, rakhna sirf leak hai |
+| ⚙️ optional | `TG_MEDIA_TOKEN_TTL_DAYS=30`, `CORS_ALLOWED_ORIGINS` |
+
+> Env badalne ke baad **Redeploy** zaroori hai — purani deployment purane values par
+> chalti rehti hai (Vercel env list me ⚠️ isi ka ishara hota hai). `FIREBASE_PRIVATE_KEY`
+> ek baar khol kar dekh lijiye: poora key ho (`-----BEGIN PRIVATE KEY-----` se shuru,
+> `-----END PRIVATE KEY-----` tak; newlines `\n` likhe hon to bhi chalega).
 
 > Bot **hamesha Render par** chalega (Vercel par 24×7 daemon possible nahi). Site
 > Vercel par ho ya Render par — dono ek hi Firebase RTDB se judte hain, isliye
 > `ADMIN_SESSION_SECRET` har jagah **same** rakhiye.
+
+### 4c · 🔥 Firebase rules publish karna
+
+Website aur bot **dono Firebase Admin SDK** use karte hain — Admin SDK rules se
+parhai hoti hai. Browser/app se koi direct RTDB access nahi hai, isliye rules
+**poora lock** rehte hain (repo me `database.rules.json` bhi yahi hai):
+
+```json
+{
+  "rules": {
+    ".read": false,
+    ".write": false
+  }
+}
+```
+
+Publish kaise karein:
+1. Firebase Console → **Realtime Database** → **Rules** tab
+2. Upar wala JSON paste karo → **Publish**
+   (ya CLI se: `firebase deploy --only database`)
+3. Bas — iske baad koi bhi client-side read/write reject hogi; site aur bot
+   (Admin SDK) bina ruke chalte rahenge.
+
+> Agar kabhi rules me kholna pade to sirf server ke through kholein (naya API route),
+> rules me `.read: true` **kabhi mat** kijiye — course data login ke peeche hai.
 
 ---
 
